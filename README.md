@@ -257,7 +257,7 @@ print(selector.selected_features)
 
 ### Detailed Timeseries Examples
 
-[TSForacsting Examples](https://github.com/TsLu1s/tsforecasting/edit/main/examples)
+[TSForacesting Guideline Examples](https://github.com/TsLu1s/tsforecasting/edit/main/examples)
 
 ## Citation
 
