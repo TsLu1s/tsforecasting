@@ -5,12 +5,12 @@ long_description = (this_directory / "README.md").read_text()
 
 setuptools.setup(
     name="tsforecasting",
-    version="1.2.65",
+    version="1.60.0",
     description="TSForecasting is an automated time series forecasting framework",
     long_description=long_description,      
     long_description_content_type="text/markdown",
     url="https://github.com/TsLu1s/TSForecasting",
-    author="Luís Santos",
+    author="Luís Fernando da Silva Santos",
     author_email="luisf_ssantos@hotmail.com",
     license="MIT",
     classifiers=[
@@ -27,7 +27,10 @@ setuptools.setup(
 
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
-        "Programming Language :: Python :: 3.8",
+        
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
     ],
     py_modules=["tsforecasting"],
     packages=setuptools.find_packages(where="src"),

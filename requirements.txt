@@ -3,7 +3,6 @@ numpy>=1.23.5
 python-dateutil>=2.8.2
 scikit-learn>=1.2.2
 autogluon>=1.1.0
-lightgbm>=4.3.0
-xgboost>=1.7.4
+xgboost==2.0.3
 catboost>=1.2.2
 tqdm>=4.65.2
