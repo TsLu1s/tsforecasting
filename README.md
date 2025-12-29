@@ -255,9 +255,9 @@ X_selected = selector.transform(X)
 print(selector.selected_features)
 ```
 
-### Detailed Timeseries Preprocessing
+### Detailed Timeseries Examples
 
-[Analyse Preprocessing Example](https://github.com/TsLu1s/TSForecasting/blob/main/examples/03_preprocessing_decomposed.py)
+[TSForacsting Examples](https://github.com/TsLu1s/tsforecasting/edit/main/examples)
 
 ## Citation
 
