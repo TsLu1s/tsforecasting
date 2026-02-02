@@ -11,10 +11,10 @@ from tsforecasting.evaluation.intervals import (
     compute_intervals,
 )
 from tsforecasting.evaluation.metrics import (
+    METRIC_STRATEGIES,
     MAEStrategy,
     MAPEStrategy,
     MaxErrorStrategy,
-    METRIC_STRATEGIES,
     MetricStrategy,
     MSEStrategy,
     aggregate_performance,

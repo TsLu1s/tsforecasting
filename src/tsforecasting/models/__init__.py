@@ -9,25 +9,23 @@ This module provides:
 """
 
 from tsforecasting.models.base import AutoGluonForecaster, BaseForecaster
-from tsforecasting.models.forecasters import (
-    # New naming convention
-    CatBoostForecaster,
-    ExtraTreesForecaster,
+from tsforecasting.models.forecasters import (  # New naming convention; Legacy naming convention (backward compatibility)
     FORECASTER_CLASSES,
-    GBRForecaster,
-    GeneralizedLRForecaster,
-    KNNForecaster,
     LEGACY_FORECASTER_CLASSES,
-    RandomForestForecaster,
-    XGBoostForecaster,
-    # Legacy naming convention (backward compatibility)
-    RandomForest_Forecasting,
-    ExtraTrees_Forecasting,
-    GBR_Forecasting,
-    KNN_Forecasting,
-    GeneralizedLR_Forecasting,
-    XGBoost_Forecasting,
     CatBoost_Forecasting,
+    CatBoostForecaster,
+    ExtraTrees_Forecasting,
+    ExtraTreesForecaster,
+    GBR_Forecasting,
+    GBRForecaster,
+    GeneralizedLR_Forecasting,
+    GeneralizedLRForecaster,
+    KNN_Forecasting,
+    KNNForecaster,
+    RandomForest_Forecasting,
+    RandomForestForecaster,
+    XGBoost_Forecasting,
+    XGBoostForecaster,
 )
 from tsforecasting.models.registry import ModelRegistry, model_configurations
 

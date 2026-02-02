@@ -27,79 +27,76 @@ Example:
 __version__ = "2.0.0"
 __author__ = "Luis Santos"
 
-# Core pipeline
-from tsforecasting.pipeline.forecasting import TSForecasting
-
 # Builder
 from tsforecasting.core.base import TSForecastingBuilder
 
-# Configuration utilities
-from tsforecasting.models.registry import ModelRegistry, model_configurations
-
-# Forecasting models (new naming convention)
-from tsforecasting.models.forecasters import (
-    RandomForestForecaster,
-    ExtraTreesForecaster,
-    GBRForecaster,
-    KNNForecaster,
-    GeneralizedLRForecaster,
-    XGBoostForecaster,
-    CatBoostForecaster,
-    FORECASTER_CLASSES,
+# Enums for type-safe configuration
+from tsforecasting.core.enums import (
+    EvaluationMetric,
+    Granularity,
+    ModelName,
+    ScalerType,
+    TimeSeriesPattern,
 )
 
-# Forecasting models (legacy naming convention for backward compatibility)
-from tsforecasting.models.forecasters import (
-    RandomForest_Forecasting,
-    ExtraTrees_Forecasting,
-    GBR_Forecasting,
-    KNN_Forecasting,
-    GeneralizedLR_Forecasting,
-    XGBoost_Forecasting,
-    CatBoost_Forecasting,
+# Exceptions
+from tsforecasting.core.exceptions import (
+    DatasetError,
+    ModelNotFoundError,
+    NotFittedError,
+    TSForecastingError,
+    ValidationError,
 )
 
-# Base forecaster and AutoGluon
-from tsforecasting.models.base import BaseForecaster, AutoGluonForecaster
-
-# Processing utilities
-from tsforecasting.processing.processor import Processing
-from tsforecasting.processing.feature_selection import TreeBasedFeatureSelector
+# Schemas for advanced usage
+from tsforecasting.core.schemas import (
+    ForecastConfig,
+    PipelineConfig,
+    PreprocessingConfig,
+)
 
 # Data generation
 from tsforecasting.data.generator import TimeSeriesDatasetGenerator
 
 # Evaluation utilities
 from tsforecasting.evaluation.metrics import (
-    vertical_performance,
     best_model,
     metrics_regression,
+    vertical_performance,
 )
 
-# Enums for type-safe configuration
-from tsforecasting.core.enums import (
-    Granularity,
-    EvaluationMetric,
-    ModelName,
-    TimeSeriesPattern,
-    ScalerType,
+# Base forecaster and AutoGluon
+from tsforecasting.models.base import AutoGluonForecaster, BaseForecaster
+
+# Forecasting models (legacy naming convention for backward compatibility)
+# Forecasting models (new naming convention)
+from tsforecasting.models.forecasters import (
+    FORECASTER_CLASSES,
+    CatBoost_Forecasting,
+    CatBoostForecaster,
+    ExtraTrees_Forecasting,
+    ExtraTreesForecaster,
+    GBR_Forecasting,
+    GBRForecaster,
+    GeneralizedLR_Forecasting,
+    GeneralizedLRForecaster,
+    KNN_Forecasting,
+    KNNForecaster,
+    RandomForest_Forecasting,
+    RandomForestForecaster,
+    XGBoost_Forecasting,
+    XGBoostForecaster,
 )
 
-# Schemas for advanced usage
-from tsforecasting.core.schemas import (
-    ForecastConfig,
-    PreprocessingConfig,
-    PipelineConfig,
-)
+# Configuration utilities
+from tsforecasting.models.registry import ModelRegistry, model_configurations
 
-# Exceptions
-from tsforecasting.core.exceptions import (
-    TSForecastingError,
-    NotFittedError,
-    ValidationError,
-    ModelNotFoundError,
-    DatasetError,
-)
+# Core pipeline
+from tsforecasting.pipeline.forecasting import TSForecasting
+from tsforecasting.processing.feature_selection import TreeBasedFeatureSelector
+
+# Processing utilities
+from tsforecasting.processing.processor import Processing
 
 __all__ = [
     # Version

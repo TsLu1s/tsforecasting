@@ -7,10 +7,10 @@ from tsforecasting.models.base import BaseForecaster
 
 class RandomForestForecaster(BaseForecaster):
     """Random Forest regression model for multi-horizon forecasting.
-    
+
     Wraps sklearn's RandomForestRegressor with MultiOutputRegressor for
     handling multiple forecast horizons simultaneously.
-    
+
     Args:
         n_estimators: Number of trees in the forest.
         random_state: Random seed for reproducibility.
@@ -20,7 +20,7 @@ class RandomForestForecaster(BaseForecaster):
         min_samples_leaf: Minimum samples required at a leaf node.
         max_features: Number of features to consider for best split.
     """
-    
+
     def __init__(
         self,
         n_estimators: int = 100,
@@ -30,7 +30,7 @@ class RandomForestForecaster(BaseForecaster):
         min_samples_split: int = 2,
         min_samples_leaf: int = 1,
         max_features: str = "sqrt",
-        **kwargs
+        **kwargs,
     ):
         super().__init__(
             n_estimators=n_estimators,
@@ -40,21 +40,22 @@ class RandomForestForecaster(BaseForecaster):
             min_samples_split=min_samples_split,
             min_samples_leaf=min_samples_leaf,
             max_features=max_features,
-            **kwargs
+            **kwargs,
         )
-    
+
     def _create_base_estimator(self) -> Any:
         from sklearn.ensemble import RandomForestRegressor
+
         return RandomForestRegressor(**self._params)
 
 
 class ExtraTreesForecaster(BaseForecaster):
     """Extra Trees regression model for multi-horizon forecasting.
-    
+
     Wraps sklearn's ExtraTreesRegressor with MultiOutputRegressor.
     Extra Trees uses random thresholds for splitting, providing additional
     randomization compared to Random Forest.
-    
+
     Args:
         n_estimators: Number of trees in the forest.
         random_state: Random seed for reproducibility.
@@ -64,7 +65,7 @@ class ExtraTreesForecaster(BaseForecaster):
         min_samples_leaf: Minimum samples required at a leaf node.
         max_features: Number of features to consider for best split.
     """
-    
+
     def __init__(
         self,
         n_estimators: int = 100,
@@ -74,7 +75,7 @@ class ExtraTreesForecaster(BaseForecaster):
         min_samples_split: int = 2,
         min_samples_leaf: int = 1,
         max_features: str = "sqrt",
-        **kwargs
+        **kwargs,
     ):
         super().__init__(
             n_estimators=n_estimators,
@@ -84,20 +85,21 @@ class ExtraTreesForecaster(BaseForecaster):
             min_samples_split=min_samples_split,
             min_samples_leaf=min_samples_leaf,
             max_features=max_features,
-            **kwargs
+            **kwargs,
         )
-    
+
     def _create_base_estimator(self) -> Any:
         from sklearn.ensemble import ExtraTreesRegressor
+
         return ExtraTreesRegressor(**self._params)
 
 
 class GBRForecaster(BaseForecaster):
     """Gradient Boosting Regression model for multi-horizon forecasting.
-    
+
     Wraps sklearn's GradientBoostingRegressor with MultiOutputRegressor.
     Uses sequential boosting to minimize loss functions.
-    
+
     Args:
         n_estimators: Number of boosting stages.
         criterion: Function to measure split quality.
@@ -107,7 +109,7 @@ class GBRForecaster(BaseForecaster):
         min_samples_leaf: Minimum samples required at a leaf node.
         loss: Loss function to optimize.
     """
-    
+
     def __init__(
         self,
         n_estimators: int = 100,
@@ -117,7 +119,7 @@ class GBRForecaster(BaseForecaster):
         min_samples_split: int = 2,
         min_samples_leaf: int = 1,
         loss: str = "squared_error",
-        **kwargs
+        **kwargs,
     ):
         super().__init__(
             n_estimators=n_estimators,
@@ -127,20 +129,21 @@ class GBRForecaster(BaseForecaster):
             min_samples_split=min_samples_split,
             min_samples_leaf=min_samples_leaf,
             loss=loss,
-            **kwargs
+            **kwargs,
         )
-    
+
     def _create_base_estimator(self) -> Any:
         from sklearn.ensemble import GradientBoostingRegressor
+
         return GradientBoostingRegressor(**self._params)
 
 
 class KNNForecaster(BaseForecaster):
     """K-Nearest Neighbors regression model for multi-horizon forecasting.
-    
+
     Wraps sklearn's KNeighborsRegressor with MultiOutputRegressor.
     Predictions are based on the k-nearest training samples.
-    
+
     Args:
         n_neighbors: Number of neighbors to use.
         weights: Weight function ('uniform' or 'distance').
@@ -148,7 +151,7 @@ class KNNForecaster(BaseForecaster):
         leaf_size: Leaf size for BallTree/KDTree.
         p: Power parameter for Minkowski metric.
     """
-    
+
     def __init__(
         self,
         n_neighbors: int = 5,
@@ -156,7 +159,7 @@ class KNNForecaster(BaseForecaster):
         algorithm: str = "auto",
         leaf_size: int = 30,
         p: int = 2,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(
             n_neighbors=n_neighbors,
@@ -164,20 +167,21 @@ class KNNForecaster(BaseForecaster):
             algorithm=algorithm,
             leaf_size=leaf_size,
             p=p,
-            **kwargs
+            **kwargs,
         )
-    
+
     def _create_base_estimator(self) -> Any:
         from sklearn.neighbors import KNeighborsRegressor
+
         return KNeighborsRegressor(**self._params)
 
 
 class GeneralizedLRForecaster(BaseForecaster):
     """Generalized Linear Regression (Tweedie) model for multi-horizon forecasting.
-    
+
     Wraps sklearn's TweedieRegressor with MultiOutputRegressor.
     Supports various distributions through the power parameter.
-    
+
     Args:
         power: Tweedie power (0=Normal, 1=Poisson, 2=Gamma).
         alpha: Regularization strength.
@@ -187,7 +191,7 @@ class GeneralizedLRForecaster(BaseForecaster):
         warm_start: Reuse previous solution.
         verbose: Verbosity level.
     """
-    
+
     def __init__(
         self,
         power: float = 1,
@@ -197,7 +201,7 @@ class GeneralizedLRForecaster(BaseForecaster):
         max_iter: int = 100,
         warm_start: bool = False,
         verbose: int = 0,
-        **kwargs
+        **kwargs,
     ):
         # Note: verbose is not passed to TweedieRegressor as it doesn't accept it
         super().__init__(
@@ -207,12 +211,13 @@ class GeneralizedLRForecaster(BaseForecaster):
             fit_intercept=fit_intercept,
             max_iter=max_iter,
             warm_start=warm_start,
-            **kwargs
+            **kwargs,
         )
         self._verbose = verbose
-    
+
     def _create_base_estimator(self) -> Any:
         from sklearn.linear_model import TweedieRegressor
+
         # Remove verbose from params as TweedieRegressor doesn't accept it
         params = {k: v for k, v in self._params.items() if k != "verbose"}
         return TweedieRegressor(**params)
@@ -220,10 +225,10 @@ class GeneralizedLRForecaster(BaseForecaster):
 
 class XGBoostForecaster(BaseForecaster):
     """XGBoost regression model for multi-horizon forecasting.
-    
+
     Wraps XGBoost's XGBRegressor with MultiOutputRegressor.
     Provides efficient gradient boosting with regularization.
-    
+
     Args:
         n_estimators: Number of boosting rounds.
         objective: Learning objective.
@@ -234,7 +239,7 @@ class XGBoostForecaster(BaseForecaster):
         subsample: Subsample ratio of training instances.
         colsample_bytree: Subsample ratio of columns per tree.
     """
-    
+
     def __init__(
         self,
         n_estimators: int = 100,
@@ -245,7 +250,7 @@ class XGBoostForecaster(BaseForecaster):
         reg_alpha: float = 0,
         subsample: float = 1,
         colsample_bytree: float = 1,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(
             n_estimators=n_estimators,
@@ -256,21 +261,22 @@ class XGBoostForecaster(BaseForecaster):
             reg_alpha=reg_alpha,
             subsample=subsample,
             colsample_bytree=colsample_bytree,
-            **kwargs
+            **kwargs,
         )
-    
+
     def _create_base_estimator(self) -> Any:
         import xgboost as xgb
+
         params = {**self._params, "verbosity": 0}
         return xgb.XGBRegressor(**params)
 
 
 class CatBoostForecaster(BaseForecaster):
     """CatBoost regression model for multi-horizon forecasting.
-    
+
     Wraps CatBoost's CatBoostRegressor with MultiOutputRegressor.
     Handles categorical features natively and provides robust regularization.
-    
+
     Args:
         iterations: Maximum number of trees.
         loss_function: Loss function to optimize.
@@ -280,7 +286,7 @@ class CatBoostForecaster(BaseForecaster):
         border_count: Number of splits for numerical features.
         subsample: Subsample ratio.
     """
-    
+
     def __init__(
         self,
         iterations: int = 100,
@@ -290,7 +296,7 @@ class CatBoostForecaster(BaseForecaster):
         l2_leaf_reg: float = 3,
         border_count: int = 254,
         subsample: float = 1,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(
             iterations=iterations,
@@ -300,13 +306,15 @@ class CatBoostForecaster(BaseForecaster):
             l2_leaf_reg=l2_leaf_reg,
             border_count=border_count,
             subsample=subsample,
-            **kwargs
+            **kwargs,
         )
-    
+
     def _create_base_estimator(self) -> Any:
         from catboost import CatBoostRegressor
+
         params = {**self._params, "verbose": False, "save_snapshot": False}
         return CatBoostRegressor(**params)
+
 
 # =============================================================================
 # Legacy class aliases for backward compatibility
@@ -346,4 +354,3 @@ LEGACY_FORECASTER_CLASSES: Dict[str, type] = {
     "XGBoost": XGBoost_Forecasting,
     "Catboost": CatBoost_Forecasting,
 }
-

@@ -18,21 +18,21 @@ from tsforecasting.models.forecasters import (
 
 class ModelRegistry:
     """Registry for forecasting models.
-    
+
     Provides centralized model management with lazy instantiation
     and default hyperparameter configurations.
-    
+
     Example:
         # Get default configurations
         configs = ModelRegistry.get_default_configurations()
-        
+
         # Create a model instance
         model = ModelRegistry.get("RandomForest", n_estimators=200)
-        
+
         # List available models
         available = ModelRegistry.list_available()
     """
-    
+
     _registry: Dict[str, Type[BaseForecaster]] = {
         ModelName.RANDOM_FOREST.value: RandomForestForecaster,
         ModelName.EXTRA_TREES.value: ExtraTreesForecaster,
@@ -43,7 +43,7 @@ class ModelRegistry:
         ModelName.CATBOOST.value: CatBoostForecaster,
         ModelName.AUTOGLUON.value: AutoGluonForecaster,
     }
-    
+
     _default_configurations: Dict[str, Dict[str, Any]] = {
         "RandomForest": {
             "n_estimators": 100,
@@ -113,94 +113,87 @@ class ModelRegistry:
             "time_limit": 10,
         },
     }
-    
+
     @classmethod
     def register(cls, name: str, forecaster_class: Type[BaseForecaster]) -> None:
         """Register a new forecaster class.
-        
+
         Args:
             name: Model identifier string.
             forecaster_class: BaseForecaster subclass.
         """
         cls._registry[name] = forecaster_class
-    
+
     @classmethod
-    def get(
-        cls,
-        name: str,
-        params: Optional[Dict[str, Any]] = None,
-        **kwargs
-    ) -> BaseForecaster:
+    def get(cls, name: str, params: Optional[Dict[str, Any]] = None, **kwargs) -> BaseForecaster:
         """Get a forecaster instance.
-        
+
         Args:
             name: Model identifier string.
             params: Optional hyperparameters dict.
             **kwargs: Additional hyperparameters (override params).
-            
+
         Returns:
             Configured BaseForecaster instance.
-            
+
         Raises:
             ModelNotFoundError: If model name not in registry.
         """
         if name not in cls._registry:
             available = ", ".join(cls._registry.keys())
-            raise ModelNotFoundError(
-                f"Model '{name}' not found. Available models: {available}"
-            )
-        
+            raise ModelNotFoundError(f"Model '{name}' not found. Available models: {available}")
+
         # Merge default config with provided params
         default_params = cls._default_configurations.get(name, {}).copy()
         if params:
             default_params.update(params)
         default_params.update(kwargs)
-        
+
         forecaster_class = cls._registry[name]
         return forecaster_class(**default_params)
-    
+
     @classmethod
     def list_available(cls) -> List[str]:
         """List all registered model names.
-        
+
         Returns:
             List of model identifier strings.
         """
         return list(cls._registry.keys())
-    
+
     @classmethod
     def get_default_configurations(cls) -> Dict[str, Dict[str, Any]]:
         """Get default hyperparameter configurations for all models.
-        
+
         Returns:
             Dictionary mapping model names to their default parameters.
         """
         return cls._default_configurations.copy()
-    
+
     @classmethod
     def get_default_config(cls, name: str) -> Dict[str, Any]:
         """Get default configuration for a specific model.
-        
+
         Args:
             name: Model identifier string.
-            
+
         Returns:
             Dictionary of default hyperparameters.
-            
+
         Raises:
             ModelNotFoundError: If model name not found.
         """
         if name not in cls._default_configurations:
             raise ModelNotFoundError(f"No default config for model '{name}'")
         return cls._default_configurations[name].copy()
-    
+
     @classmethod
     def is_registered(cls, name: str) -> bool:
         """Check if a model is registered.
-        
+
         Args:
             name: Model identifier string.
-            
+
         Returns:
             True if model is registered.
         """
@@ -209,9 +202,9 @@ class ModelRegistry:
 
 def model_configurations() -> Dict[str, Dict[str, Any]]:
     """Get default model configurations.
-    
+
     Convenience function for backward compatibility.
-    
+
     Returns:
         Dictionary mapping model names to their default parameters.
     """
