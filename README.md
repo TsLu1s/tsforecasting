@@ -58,7 +58,7 @@ The Expanding Window evaluation technique provides a temporal approximation of t
 
 ## Where to get it <a name = "ta"></a>
 
-Binary installer for the latest released version is available at the Python Package Index (PyPI).   
+Binary installer for the latest released version is available at the Python Package Index [(PyPI)](https://pypi.org/project/tsforecasting/).   
 
 ## Installation  
 
@@ -67,6 +67,7 @@ To install this package from Pypi repository run the following command:
 ```
 pip install tsforecasting
 ```
+
 
 # Usage Examples
     
@@ -78,28 +79,29 @@ The pipeline follows a straightforward workflow: configure parameters, fit the m
 
 **Pipeline Parameters:**
 
-* `train_size`: Proportion of data used for the initial training window (0.3 to 1.0)
+* `train_size`: Proportion of data used for the initial training window (0.3 to 0.95)
 * `lags`: Number of lag features (window size) - how many past observations each input sample includes
 * `horizon`: Number of future time steps to forecast
 * `sliding_size`: Window expansion size per iteration (`sliding_size >= horizon` recommended)
-* `models`: List of models to evaluate and ensemble. Available options:
+* `models`: List of models to evaluate. Available options:
   * `RandomForest`, `ExtraTrees`, `GBR`, `KNN`, `GeneralizedLR`
-  * `XGBoost`, `Catboost`, `AutoGluon`
+  * `XGBoost`,`Catboost`, `AutoGluon`
 * `hparameters`: Nested dictionary containing model-specific hyperparameter configurations (customizable via `model_configurations()`)
 * `granularity`: Time frequency of the data - `1m`, `30m`, `1h`, `1d`, `1wk`, `1mo` (default: `1d`)
 * `metric`: Evaluation metric for model selection - `MAE`, `MAPE`, or `MSE` (default: `MAE`)
 
 ```py
-from tsforecasting import TSForecasting, model_configurations
-import pandas as pd
 import warnings
+import pandas as pd
+from tsforecasting import TSForecasting, model_configurations
+
 warnings.filterwarnings("ignore", category=Warning)
 
 # Load and prepare data
-data = pd.read_csv('your_timeseries.csv') 
-data = data.rename(columns={'DateTime_Column': 'Date', 'Target_Column': 'y'})
-data['Date'] = pd.to_datetime(data['Date'])
-data = data[['Date', 'y']]
+data = pd.read_csv("your_timeseries.csv")
+data = data.rename(columns={"DateTime_Column": "Date", "Target_Column": "y"})
+data["Date"] = pd.to_datetime(data["Date"])
+data = data[["Date", "y"]]
 
 # Get and customize model hyperparameters
 hparameters = model_configurations()
@@ -113,11 +115,17 @@ tsf = TSForecasting(
     lags=10,
     horizon=10,
     sliding_size=10,
-    models=['RandomForest', 'ExtraTrees', 'GBR', 'KNN', 
-            'XGBoost', 'Catboost'],
+    models=[
+        "RandomForest",
+        "ExtraTrees",
+        "GBR",
+        "KNN",
+        "XGBoost",
+        "Catboost",
+    ],
     hparameters=hparameters,
-    granularity='1d',
-    metric='MAE'
+    granularity="1d",
+    metric="MAE",
 )
 tsf.fit_forecast(dataset=data)
 
@@ -127,7 +135,7 @@ print(f"Best Model: {tsf.selected_model}")
 
 # Generate forecast with prediction intervals
 forecast = tsf.forecast()
-print(forecast[['Date', 'y', 'y_lower_90', 'y_upper_90']])
+print(forecast[["Date", "y", "y_lower_90", "y_upper_90"]])
 ```
 
 ### Performance Analysis
@@ -258,6 +266,12 @@ print(selector.selected_features)
 ### Detailed Timeseries Examples
 
 [TSForecasting Guideline Examples](https://github.com/TsLu1s/tsforecasting/edit/main/examples)
+
+## Interactive Notebooks
+
+For a more interactive experience, feel free to explore the Jupyter notebooks with step-by-step execution and guidelines:
+
+📓 **[Interactive Notebooks](https://github.com/TsLu1s/tsforecasting/blob/main/examples/notebooks)**
 
 ## Citation
 
