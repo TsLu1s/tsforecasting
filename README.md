@@ -68,7 +68,6 @@ To install this package from Pypi repository run the following command:
 pip install tsforecasting
 ```
 
-
 # Usage Examples
     
 ## 1. TSForecasting - Automated Time Series Forecasting
