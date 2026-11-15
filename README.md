@@ -251,7 +251,9 @@ forecast = tsf.forecast(interval_method="gaussian")
 
 The final model fit is cached, so comparing interval methods on the same data does not retrain the model.
 
-**Calibration notes:** intervals are calibrated per horizon on the out-of-sample residuals of the selected model collected during the expanding window evaluation (`n = windows × horizon` residuals per horizon). Empirical bounds cannot extend beyond the most extreme residual observed, so high coverage levels need enough residuals to be resolved - roughly `n >= 19` for 95% and `n >= 99` for 99%. With fewer, the 95% and 99% intervals are narrower than their nominal level; use a smaller `sliding_size` or more data to obtain more evaluation windows.
+**Calibration notes:** intervals are calibrated per horizon on the out-of-sample residuals of the selected model collected during the expanding window evaluation (`n = windows × horizon` residuals per horizon). 
+Empirical bounds cannot extend beyond the most extreme residual observed, so high coverage levels need enough residuals to be resolved - roughly `n >= 19` for 95% and `n >= 99` for 99%. 
+With fewer, the 95% and 99% intervals are narrower than their nominal level; use a smaller `sliding_size` or more data to obtain more evaluation windows.
 
 ## 4. Auxiliary Methods
 
