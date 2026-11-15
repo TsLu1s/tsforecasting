@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Union
+from typing import Any, Union
 
 
 class Granularity(str, Enum):
@@ -20,14 +20,12 @@ class Granularity(str, Enum):
 
         key = str(value).lower().strip()
         aliases = {
-            # Primary values
             "1m": cls.MINUTE,
             "30m": cls.HALF_HOUR,
             "1h": cls.HOURLY,
             "1d": cls.DAILY,
             "1wk": cls.WEEKLY,
             "1mo": cls.MONTHLY,
-            # Aliases
             "minute": cls.MINUTE,
             "min": cls.MINUTE,
             "m": cls.MINUTE,
@@ -53,7 +51,12 @@ class Granularity(str, Enum):
 
     @classmethod
     def to_timedelta_kwargs(cls, granularity: "Granularity") -> dict:
-        """Convert granularity to timedelta keyword arguments."""
+        """Convert granularity to offset keyword arguments.
+
+        The result is valid for ``pandas.DateOffset`` and
+        ``dateutil.relativedelta``. Note that ``datetime.timedelta`` has no
+        ``months`` argument, so the monthly entry cannot be passed to it.
+        """
         mapping = {
             cls.MINUTE: {"minutes": 1},
             cls.HALF_HOUR: {"minutes": 30},
@@ -64,6 +67,19 @@ class Granularity(str, Enum):
         }
         return mapping[granularity]
 
+    @property
+    def approx_seconds(self) -> float:
+        """Approximate length of one step in seconds (a month counts as 30.44 days)."""
+        seconds = {
+            Granularity.MINUTE: 60.0,
+            Granularity.HALF_HOUR: 1800.0,
+            Granularity.HOURLY: 3600.0,
+            Granularity.DAILY: 86400.0,
+            Granularity.WEEKLY: 604800.0,
+            Granularity.MONTHLY: 2629800.0,
+        }
+        return seconds[self]
+
 
 class EvaluationMetric(str, Enum):
     """Evaluation metrics for model performance."""
@@ -71,6 +87,25 @@ class EvaluationMetric(str, Enum):
     MAE = "mae"
     MAPE = "mape"
     MSE = "mse"
+
+    @classmethod
+    def from_string(cls, value: Union["EvaluationMetric", str]) -> "EvaluationMetric":
+        """Parse string to EvaluationMetric (case-insensitive, accepts display names)."""
+        if isinstance(value, cls):
+            return value
+
+        key = str(value).lower().strip()
+        aliases = {
+            "mae": cls.MAE,
+            "mean absolute error": cls.MAE,
+            "mape": cls.MAPE,
+            "mean absolute percentage error": cls.MAPE,
+            "mse": cls.MSE,
+            "mean squared error": cls.MSE,
+        }
+        if key in aliases:
+            return aliases[key]
+        raise ValueError(f"Invalid metric: '{value}'. Options: 'MAE', 'MAPE', 'MSE'")
 
     @property
     def display_name(self) -> str:
@@ -95,6 +130,16 @@ class ModelName(str, Enum):
     CATBOOST = "Catboost"
     AUTOGLUON = "AutoGluon"
 
+    @classmethod
+    def _missing_(cls, value: Any) -> Any:
+        """Resolve names case-insensitively (e.g. 'xgboost', 'CatBoost')."""
+        if isinstance(value, str):
+            key = value.strip().lower()
+            for member in cls:
+                if member.value.lower() == key:
+                    return member
+        return None
+
 
 class TimeSeriesPattern(str, Enum):
     """Synthetic time series pattern types."""
@@ -114,14 +159,12 @@ class TimeSeriesPattern(str, Enum):
 
         key = str(value).lower().strip()
         aliases = {
-            # Primary values
             "trend": cls.TREND,
             "seasonal": cls.SEASONAL,
             "mixed": cls.MIXED,
             "random_walk": cls.RANDOM_WALK,
             "multi_seasonal": cls.MULTI_SEASONAL,
             "regime_change": cls.REGIME_CHANGE,
-            # Aliases
             "randomwalk": cls.RANDOM_WALK,
             "rw": cls.RANDOM_WALK,
             "walk": cls.RANDOM_WALK,
@@ -143,6 +186,25 @@ class ScalerType(str, Enum):
     STANDARD = "standard"
     MINMAX = "minmax"
     ROBUST = "robust"
+
+    @classmethod
+    def from_string(cls, value: Union["ScalerType", str]) -> "ScalerType":
+        """Parse string to ScalerType (case-insensitive)."""
+        if isinstance(value, cls):
+            return value
+
+        key = str(value).lower().strip().replace("_", "").replace("-", "")
+        aliases = {
+            "standard": cls.STANDARD,
+            "standardscaler": cls.STANDARD,
+            "minmax": cls.MINMAX,
+            "minmaxscaler": cls.MINMAX,
+            "robust": cls.ROBUST,
+            "robustscaler": cls.ROBUST,
+        }
+        if key in aliases:
+            return aliases[key]
+        raise ValueError(f"Invalid scaler: '{value}'. Options: 'standard', 'minmax', 'robust'")
 
 
 class TrendType(str, Enum):

@@ -48,17 +48,26 @@ Major frameworks used to build this project:
 * [CatBoost](https://catboost.ai/)
 * [XGBoost](https://xgboost.readthedocs.io/en/stable/)
 
-## Performance Evaluation Structure <a name = "ta"></a>
+## Pipeline Architecture <a name = "ta"></a>
 
 <p align="center">
-  <img src="https://i.ibb.co/ctYj6tt/Expanding-Window-TSF.png" align="center" width="450" height="350" />
-</p>  
-    
-The Expanding Window evaluation technique provides a temporal approximation of the real value of time series data. The first test segment is selected according to the train length and then forecasted in accordance with the forecast horizon. The starting position of each subsequent segment is set in direct relation to the sliding window size - if the sliding size equals the forecast size, each segment starts at the end of the previous one. This process repeats until all time series data is segmented, using all iterations and observations to construct an aggregated and robust performance analysis for each predicted point.
+  <a href="https://raw.githubusercontent.com/TsLu1s/tsforecasting/main/docs/TSForecasting_Pipeline_Diagram.png">
+    <img src="https://raw.githubusercontent.com/TsLu1s/tsforecasting/main/docs/TSForecasting_Pipeline_Diagram.png" alt="TSForecasting pipeline: preprocessing, leak-free expanding window evaluation, forecasting with prediction intervals, and outputs" width="100%" />
+  </a>
+</p>
+
+<p align="center"><sub>Click the diagram to open it at full resolution. Source: <a href="https://github.com/TsLu1s/tsforecasting/blob/main/docs/TSForecasting_Pipeline_Diagram.drawio"><code>docs/TSForecasting_Pipeline_Diagram.drawio</code></a> (editable in <a href="https://app.diagrams.net">diagrams.net</a>).</sub></p>
+
+The pipeline runs in four stages:
+
+1. **Preprocessing**: validates the input (rows sorted by date; missing values and duplicated timestamps rejected) and turns the series into a supervised table of lag features and multi-step horizon targets, with optional datetime features.
+2. **Expanding Window Evaluation**: the training set grows by `sliding_size` on each iteration and the next `horizon` steps are forecast. The `horizon - 1` rows whose targets reach past the forecast origin are purged, so scores are free of look-ahead leakage. The scaler is fitted on each window's training rows only, and a model that fails is skipped and reported in `failed_models`.
+3. **Model Selection**: errors (MAE, MAPE, MSE, Max Error) are aggregated across windows and horizons into a leaderboard, and the best model by the chosen `metric` is selected.
+4. **Forecasting**: the selected model is refitted on every row with complete targets and predicts the future timestamps, with prediction intervals at 80%, 90%, 95% and 99% coverage (`ensemble`, `quantile`, `conformal` or `gaussian`).
 
 ## Where to get it <a name = "ta"></a>
 
-Binary installer for the latest released version is available at the Python Package Index [(PyPI)](https://pypi.org/project/tsforecasting/).   
+Binary installer for the latest released version is available at the Python Package Index (PyPI).   
 
 ## Installation  
 
@@ -68,26 +77,37 @@ To install this package from Pypi repository run the following command:
 pip install tsforecasting
 ```
 
+Python 3.10 or newer is required.
+
+
 # Usage Examples
     
 ## 1. TSForecasting - Automated Time Series Forecasting
 
 The first step after importing the package is to load a dataset and define your DateTime (`datetime64[ns]` type) and Target column to be predicted, then rename them to `Date` and `y`, respectively.
 
+**Input data requirements:** one row per timestamp at regular spacing, a datetime `Date` column and a numeric `y` column without missing values. Rows are sorted chronologically when needed (with a warning); duplicated timestamps, missing or non-numeric targets raise a `DatasetError` with a description of the problem. Columns other than `Date` and `y` are ignored.
+
 The pipeline follows a straightforward workflow: configure parameters, fit the model across expanding windows, evaluate performance, and generate forecasts with prediction intervals. The `fit_forecast` method trains and evaluates all selected models using the expanding window approach, automatically selecting the best performer. The `history` method returns detailed performance metrics across all windows and horizons, while `forecast` generates future predictions using the best model.
 
 **Pipeline Parameters:**
 
-* `train_size`: Proportion of data used for the initial training window (0.3 to 0.95)
+* `train_size`: Proportion of data used for the initial training window (`0.3 <= train_size < 1.0`)
 * `lags`: Number of lag features (window size) - how many past observations each input sample includes
 * `horizon`: Number of future time steps to forecast
 * `sliding_size`: Window expansion size per iteration (`sliding_size >= horizon` recommended)
-* `models`: List of models to evaluate. Available options:
+* `models`: List of models to evaluate (names are case-insensitive). Available options:
   * `RandomForest`, `ExtraTrees`, `GBR`, `KNN`, `GeneralizedLR`
   * `XGBoost`,`Catboost`, `AutoGluon`
+  * any model added with `ModelRegistry.register` (see [Custom Models](#5-custom-models))
 * `hparameters`: Nested dictionary containing model-specific hyperparameter configurations (customizable via `model_configurations()`)
-* `granularity`: Time frequency of the data - `1m`, `30m`, `1h`, `1d`, `1wk`, `1mo` (default: `1d`)
+* `granularity`: Time frequency of the data - `1m`, `30m`, `1h`, `1d`, `1wk`, `1mo` (default: `1d`). It drives the timestamps of the forecast; a warning is raised when it does not match the spacing of `Date`
 * `metric`: Evaluation metric for model selection - `MAE`, `MAPE`, or `MSE` (default: `MAE`)
+* `scaler`: Feature scaler - `standard`, `minmax`, `robust` (default: `standard`)
+* `datetime_features`: Whether date-based features are added to the lag features (default: `True`)
+* `verbose`: Whether evaluation progress is printed (default: `True`)
+
+Invalid parameters raise a `ConfigurationError` (an unknown model raises `ModelNotFoundError`), both when constructing the pipeline and when using the builder.
 
 ```py
 import warnings
@@ -132,6 +152,10 @@ tsf.fit_forecast(dataset=data)
 history = tsf.history()
 print(f"Best Model: {tsf.selected_model}")
 
+# A model that raises during evaluation is skipped (with a warning) instead of
+# aborting the run; skipped models and their errors are listed here
+print(tsf.failed_models)
+
 # Generate forecast with prediction intervals
 forecast = tsf.forecast()
 print(forecast[["Date", "y", "y_lower_90", "y_upper_90"]])
@@ -154,7 +178,8 @@ print(predictions.head())
 # 2. Complete Performance - Detailed metrics per window and horizon
 performance_complete = history.performance_complete
 print(performance_complete.head(10))
-# Columns: Model, Window, Horizon, MAE, MAPE, MSE, Max Error
+# Columns: Model, Window, Horizon, Mean Absolute Error,
+#          Mean Absolute Percentage Error, Mean Squared Error, Max Error
 
 # 3. Performance by Horizon - Aggregated metrics across windows per horizon
 performance_horizon = history.performance_by_horizon
@@ -165,6 +190,7 @@ print(performance_horizon)
 leaderboard = history.leaderboard
 print(leaderboard.to_string(index=False))
 # Models ranked by mean performance across all windows
+# ("Max Error" reports the largest single error observed)
 
 # 5. Selected Model
 print(f"Best Model: {history.selected_model}")
@@ -207,7 +233,7 @@ TSForecasting generates prediction intervals at four fixed coverage levels: **80
 
 * **Quantile**: Computes empirical percentiles of historical residuals (`lower = forecast + percentile(residuals, α/2)`). Captures asymmetric errors without distributional assumptions.
 
-* **Conformal**: Uses absolute errors as nonconformity scores with finite-sample correction. Provides coverage guarantees with symmetric, constant-width intervals.
+* **Conformal**: Uses absolute errors as nonconformity scores and takes the `ceil((n + 1) × coverage)`-th smallest score (finite-sample correction). Provides coverage guarantees with symmetric, constant-width intervals.
 
 * **Gaussian**: Assumes normally distributed residuals (`lower = forecast + bias - z × std`). Efficient and accounts for systematic bias.
 
@@ -222,6 +248,10 @@ forecast = tsf.forecast(interval_method="quantile")
 forecast = tsf.forecast(interval_method="conformal")
 forecast = tsf.forecast(interval_method="gaussian")
 ```
+
+The final model fit is cached, so comparing interval methods on the same data does not retrain the model.
+
+**Calibration notes:** intervals are calibrated per horizon on the out-of-sample residuals of the selected model collected during the expanding window evaluation (`n = windows × horizon` residuals per horizon). Empirical bounds cannot extend beyond the most extreme residual observed, so high coverage levels need enough residuals to be resolved - roughly `n >= 19` for 95% and `n >= 99` for 99%. With fewer, the 95% and 99% intervals are narrower than their nominal level; use a smaller `sliding_size` or more data to obtain more evaluation windows.
 
 ## 4. Auxiliary Methods
 
@@ -239,7 +269,7 @@ from tsforecasting import Processing
 processor = Processing()
 timeseries = processor.make_timeseries(
     dataset=data,
-    window_size=10, 
+    window_size=10,
     horizon=5, 
     datetime_engineering=True
 )
@@ -262,9 +292,42 @@ X_selected = selector.transform(X)
 print(selector.selected_features)
 ```
 
+## 5. Custom Models
+
+Any estimator with a scikit-learn style `fit`/`predict` can take part in the evaluation: wrap it in a `BaseForecaster` subclass and register it. Registered models are selected by name like the built-in ones.
+
+```py
+from sklearn.linear_model import Ridge
+from tsforecasting import BaseForecaster, ModelRegistry, TSForecasting
+
+class RidgeForecaster(BaseForecaster):
+    def _create_base_estimator(self):
+        return Ridge(**self._params)
+
+ModelRegistry.register("Ridge", RidgeForecaster, default_params={"alpha": 1.0})
+
+tsf = TSForecasting(lags=10, horizon=5, sliding_size=5, models=["Ridge", "RandomForest"])
+tsf.fit_forecast(dataset=data)
+```
+
+## 6. Error Handling
+
+All exceptions derive from `TSForecastingError`:
+
+| Exception | Raised when |
+|-----------|-------------|
+| `ConfigurationError` | A pipeline parameter is out of range or not recognised |
+| `ModelNotFoundError` | A model name is not registered |
+| `DatasetError` | The dataset is malformed (missing columns, NaN/non-numeric target, duplicated timestamps) |
+| `InsufficientDataError` | The dataset is too small for the requested `lags`, `horizon`, `train_size` and `sliding_size` |
+| `ModelFitError` | Every candidate model failed during evaluation |
+| `NotFittedError` | `history()` or `forecast()` is called before `fit_forecast()` |
+
+Input-related errors (`ConfigurationError`, `ModelNotFoundError`, `DatasetError`, `InsufficientDataError`) are also `ValueError` subclasses.
+
 ### Detailed Timeseries Examples
 
-[TSForecasting Guideline Examples](https://github.com/TsLu1s/tsforecasting/edit/main/examples)
+[TSForecasting Guideline Examples](https://github.com/TsLu1s/tsforecasting/tree/main/examples)
 
 ## Interactive Notebooks
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List, Optional, Type
 
 from tsforecasting.core.enums import ModelName
@@ -31,6 +32,10 @@ class ModelRegistry:
 
         # List available models
         available = ModelRegistry.list_available()
+
+        # Register a custom model and use it in the pipeline
+        ModelRegistry.register("Ridge", RidgeForecaster, default_params={"alpha": 1.0})
+        tsf = TSForecasting(models=["Ridge", "RandomForest"])
     """
 
     _registry: Dict[str, Type[BaseForecaster]] = {
@@ -65,7 +70,6 @@ class ModelRegistry:
         },
         "GBR": {
             "n_estimators": 100,
-            "criterion": "friedman_mse",
             "learning_rate": 0.1,
             "max_depth": 3,
             "min_samples_split": 2,
@@ -115,14 +119,71 @@ class ModelRegistry:
     }
 
     @classmethod
-    def register(cls, name: str, forecaster_class: Type[BaseForecaster]) -> None:
+    def register(
+        cls,
+        name: str,
+        forecaster_class: Type[BaseForecaster],
+        default_params: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Register a new forecaster class.
+
+        Registered models can be selected by name in ``TSForecasting(models=[...])``.
 
         Args:
             name: Model identifier string.
             forecaster_class: BaseForecaster subclass.
+            default_params: Optional default hyperparameters for the model.
+
+        Raises:
+            TypeError: If ``forecaster_class`` is not a BaseForecaster subclass.
         """
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Model name must be a non-empty string.")
+        if not (
+            isinstance(forecaster_class, type) and issubclass(forecaster_class, BaseForecaster)
+        ):
+            raise TypeError("forecaster_class must be a subclass of BaseForecaster.")
+
+        name = name.strip()
         cls._registry[name] = forecaster_class
+        if default_params is not None:
+            cls._default_configurations[name] = copy.deepcopy(default_params)
+
+    @classmethod
+    def unregister(cls, name: str) -> None:
+        """Remove a model (and its default configuration) from the registry.
+
+        Raises:
+            ModelNotFoundError: If model name not in registry.
+        """
+        resolved = cls.resolve_name(name)
+        del cls._registry[resolved]
+        cls._default_configurations.pop(resolved, None)
+
+    @classmethod
+    def resolve_name(cls, name: str) -> str:
+        """Resolve a model name to its registered spelling (case-insensitive).
+
+        Args:
+            name: Model identifier, e.g. "xgboost", "CatBoost" or ``ModelName.KNN``.
+
+        Returns:
+            Registered model identifier string.
+
+        Raises:
+            ModelNotFoundError: If model name not in registry.
+        """
+        key = name.value if isinstance(name, ModelName) else str(name).strip()
+        if key in cls._registry:
+            return key
+
+        lowered = key.lower()
+        for registered in cls._registry:
+            if registered.lower() == lowered:
+                return registered
+
+        available = ", ".join(cls._registry.keys())
+        raise ModelNotFoundError(f"Model '{name}' not found. Available models: {available}")
 
     @classmethod
     def get(cls, name: str, params: Optional[Dict[str, Any]] = None, **kwargs) -> BaseForecaster:
@@ -139,12 +200,9 @@ class ModelRegistry:
         Raises:
             ModelNotFoundError: If model name not in registry.
         """
-        if name not in cls._registry:
-            available = ", ".join(cls._registry.keys())
-            raise ModelNotFoundError(f"Model '{name}' not found. Available models: {available}")
+        name = cls.resolve_name(name)
 
-        # Merge default config with provided params
-        default_params = cls._default_configurations.get(name, {}).copy()
+        default_params = copy.deepcopy(cls._default_configurations.get(name, {}))
         if params:
             default_params.update(params)
         default_params.update(kwargs)
@@ -166,9 +224,11 @@ class ModelRegistry:
         """Get default hyperparameter configurations for all models.
 
         Returns:
-            Dictionary mapping model names to their default parameters.
+            Dictionary mapping model names to their default parameters. The
+            result is an independent deep copy: editing it never changes the
+            registry defaults.
         """
-        return cls._default_configurations.copy()
+        return copy.deepcopy(cls._default_configurations)
 
     @classmethod
     def get_default_config(cls, name: str) -> Dict[str, Any]:
@@ -183,9 +243,13 @@ class ModelRegistry:
         Raises:
             ModelNotFoundError: If model name not found.
         """
+        try:
+            name = cls.resolve_name(name)
+        except ModelNotFoundError:
+            raise ModelNotFoundError(f"No default config for model '{name}'") from None
         if name not in cls._default_configurations:
             raise ModelNotFoundError(f"No default config for model '{name}'")
-        return cls._default_configurations[name].copy()
+        return copy.deepcopy(cls._default_configurations[name])
 
     @classmethod
     def is_registered(cls, name: str) -> bool:
@@ -197,7 +261,11 @@ class ModelRegistry:
         Returns:
             True if model is registered.
         """
-        return name in cls._registry
+        try:
+            cls.resolve_name(name)
+        except ModelNotFoundError:
+            return False
+        return True
 
 
 def model_configurations() -> Dict[str, Dict[str, Any]]:
@@ -206,6 +274,7 @@ def model_configurations() -> Dict[str, Dict[str, Any]]:
     Convenience function for backward compatibility.
 
     Returns:
-        Dictionary mapping model names to their default parameters.
+        Dictionary mapping model names to their default parameters (a fresh
+        deep copy on every call, safe to customise).
     """
     return ModelRegistry.get_default_configurations()

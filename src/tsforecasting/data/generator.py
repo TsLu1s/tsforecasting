@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -47,27 +47,18 @@ class TimeSeriesDatasetGenerator:
     @staticmethod
     def generate(
         n_samples: int = 1000,
-        granularity: Union[
-            Granularity, str
-        ] = "1d",  # Options: "1m", "30m", "1h", "1d", "1wk", "1mo"
-        patterns: Optional[
-            List[Union[TimeSeriesPattern, str]]
-        ] = None,  # Options: "trend", "seasonal", "mixed", "random_walk", "multi_seasonal", "regime_change"
-        # Trend parameters
-        trend_strength: float = 0.5,  # Range: 0.0 to 1.0 (0=no trend, 1=strong trend)
-        trend_type: Union[TrendType, str] = "linear",  # Options: "linear", "exponential"
-        # Seasonality parameters
-        seasonality_period: int = 12,  # Period length in time steps (e.g., 12 for monthly annual cycle)
-        seasonality_strength: float = 1.0,  # Range: 0.0 to 2.0 (amplitude multiplier)
-        secondary_period: Optional[int] = None,  # Secondary period for multi_seasonal pattern
-        # Noise parameters
-        noise_level: float = 0.1,  # Range: 0.0 to 1.0 (std dev as fraction of base_value)
-        # Regime change parameters
-        regime_change_points: Optional[List[int]] = None,  # Indices where structural breaks occur
-        # General parameters
-        start_date: str = "2020-01-01",  # Start date in "YYYY-MM-DD" format
-        base_value: float = 100.0,  # Base value around which series fluctuates
-        random_state: int = 42,  # Random seed for reproducibility
+        granularity: Union[Granularity, str] = "1d",
+        patterns: Optional[List[Union[TimeSeriesPattern, str]]] = None,
+        trend_strength: float = 0.5,
+        trend_type: Union[TrendType, str] = "linear",
+        seasonality_period: int = 12,
+        seasonality_strength: float = 1.0,
+        secondary_period: Optional[int] = None,
+        noise_level: float = 0.1,
+        regime_change_points: Optional[List[int]] = None,
+        start_date: str = "2020-01-01",
+        base_value: float = 100.0,
+        random_state: Optional[int] = 42,
     ) -> pd.DataFrame:
         """Generate synthetic time series with configurable patterns.
 
@@ -119,12 +110,18 @@ class TimeSeriesDatasetGenerator:
 
             base_value: Central value around which series fluctuates.
 
-            random_state: Seed for reproducible random generation.
+            random_state: Seed for reproducible random generation. The
+                generator draws from its own random stream, so NumPy's global
+                random state is left untouched. Use None for a different
+                series on every call.
 
         Returns:
             DataFrame with columns:
             - 'Date': datetime index (periodic, no gaps)
             - 'y': target values
+
+        Raises:
+            ValueError: If a parameter is out of its valid range.
 
         Examples:
             # Simple trend + seasonality
@@ -153,28 +150,32 @@ class TimeSeriesDatasetGenerator:
                 regime_change_points=[300, 700],
             )
         """
-        np.random.seed(random_state)
+        if not isinstance(n_samples, (int, np.integer)) or n_samples < 1:
+            raise ValueError(f"n_samples must be a positive integer, got {n_samples!r}")
+        if seasonality_period < 1:
+            raise ValueError(f"seasonality_period must be >= 1, got {seasonality_period!r}")
+        if secondary_period is not None and secondary_period < 1:
+            raise ValueError(f"secondary_period must be >= 1, got {secondary_period!r}")
+        if noise_level < 0:
+            raise ValueError(f"noise_level must be >= 0, got {noise_level!r}")
 
-        # Parse granularity
+        # Private random stream: same values as the legacy global seeding for a
+        # given seed, without altering np.random's global state.
+        rng = np.random.RandomState(random_state)
+
         granularity = TimeSeriesDatasetGenerator._parse_granularity(granularity)
 
-        # Parse trend type
         trend_type = TimeSeriesDatasetGenerator._parse_trend_type(trend_type)
 
-        # Default to MIXED pattern
         if patterns is None:
             patterns = [TimeSeriesPattern.MIXED]
 
-        # Parse patterns (convert strings to enums)
         patterns = [TimeSeriesDatasetGenerator._parse_pattern(p) for p in patterns]
 
-        # Generate base time index
         t = np.arange(n_samples)
 
-        # Initialize series with base value
         y = np.full(n_samples, base_value, dtype=float)
 
-        # Apply patterns
         for pattern in patterns:
             if pattern == TimeSeriesPattern.TREND:
                 y += TimeSeriesDatasetGenerator._generate_trend(
@@ -193,11 +194,13 @@ class TimeSeriesDatasetGenerator:
                 y += TimeSeriesDatasetGenerator._generate_seasonal(
                     t, seasonality_period, seasonality_strength * 0.5, base_value
                 )
-                y += TimeSeriesDatasetGenerator._generate_noise(n_samples, noise_level, base_value)
+                y += TimeSeriesDatasetGenerator._generate_noise(
+                    n_samples, noise_level, base_value, rng
+                )
 
             elif pattern == TimeSeriesPattern.RANDOM_WALK:
                 y += TimeSeriesDatasetGenerator._generate_random_walk(
-                    n_samples, noise_level, base_value
+                    n_samples, noise_level, base_value, rng
                 )
 
             elif pattern == TimeSeriesPattern.MULTI_SEASONAL:
@@ -211,16 +214,15 @@ class TimeSeriesDatasetGenerator:
 
             elif pattern == TimeSeriesPattern.REGIME_CHANGE:
                 y += TimeSeriesDatasetGenerator._generate_regime_changes(
-                    n_samples, regime_change_points, base_value
+                    n_samples, regime_change_points, base_value, rng
                 )
 
         # Add base noise if not MIXED (MIXED already includes noise)
         if TimeSeriesPattern.MIXED not in patterns:
             y += TimeSeriesDatasetGenerator._generate_noise(
-                n_samples, noise_level * 0.5, base_value
+                n_samples, noise_level * 0.5, base_value, rng
             )
 
-        # Generate dates
         dates = TimeSeriesDatasetGenerator._generate_dates(start_date, n_samples, granularity)
 
         return pd.DataFrame({"Date": dates, "y": y})
@@ -253,18 +255,22 @@ class TimeSeriesDatasetGenerator:
         n_samples: int,
         level: float,
         base_value: float,
+        rng: Optional[np.random.RandomState] = None,
     ) -> np.ndarray:
         """Generate noise component."""
-        return np.random.normal(0, level * base_value, n_samples)
+        rng = rng if rng is not None else np.random
+        return rng.normal(0, level * base_value, n_samples)
 
     @staticmethod
     def _generate_random_walk(
         n_samples: int,
         level: float,
         base_value: float,
+        rng: Optional[np.random.RandomState] = None,
     ) -> np.ndarray:
         """Generate random walk component."""
-        steps = np.random.normal(0, level * base_value * 0.1, n_samples)
+        rng = rng if rng is not None else np.random
+        steps = rng.normal(0, level * base_value * 0.1, n_samples)
         return np.cumsum(steps)
 
     @staticmethod
@@ -272,17 +278,18 @@ class TimeSeriesDatasetGenerator:
         n_samples: int,
         change_points: Optional[List[int]],
         base_value: float,
+        rng: Optional[np.random.RandomState] = None,
     ) -> np.ndarray:
         """Generate regime change component."""
+        rng = rng if rng is not None else np.random
         if change_points is None:
-            # Default: changes at 1/3 and 2/3 of series
             change_points = [n_samples // 3, 2 * n_samples // 3]
 
         result = np.zeros(n_samples)
-        shifts = np.random.uniform(-0.2, 0.2, len(change_points)) * base_value
+        shifts = rng.uniform(-0.2, 0.2, len(change_points)) * base_value
 
         for i, cp in enumerate(change_points):
-            if cp < n_samples:
+            if 0 <= cp < n_samples:
                 result[cp:] += shifts[i]
 
         return result
@@ -293,23 +300,26 @@ class TimeSeriesDatasetGenerator:
         n_samples: int,
         granularity: Granularity,
     ) -> pd.DatetimeIndex:
-        """Generate date range with periodic linear timestamps (no gaps)."""
+        """Generate date range with periodic linear timestamps (no gaps).
+
+        Sub-monthly series start exactly at ``start_date``. Monthly series are
+        anchored to month starts, beginning at the first month start on or
+        after ``start_date``.
+        """
         freq_map = {
-            Granularity.MINUTE: "min",  # Updated from "T"
-            Granularity.HALF_HOUR: "30min",  # Updated from "30T"
-            Granularity.HOURLY: "h",  # Updated from "H"
+            Granularity.MINUTE: "min",
+            Granularity.HALF_HOUR: "30min",
+            Granularity.HOURLY: "h",
             Granularity.DAILY: "D",
-            Granularity.WEEKLY: "W",
+            Granularity.WEEKLY: "7D",  # Weekly steps from start_date (not Sunday-anchored)
             Granularity.MONTHLY: "MS",
         }
         return pd.date_range(start=start_date, periods=n_samples, freq=freq_map[granularity])
 
     @staticmethod
     def quick_monthly(
-        n_samples: int = 120,  # Default: 10 years of monthly data
-        patterns: Optional[
-            List[Union[TimeSeriesPattern, str]]
-        ] = None,  # Options: "trend", "seasonal", "mixed", "random_walk", "multi_seasonal", "regime_change"
+        n_samples: int = 120,
+        patterns: Optional[List[Union[TimeSeriesPattern, str]]] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """Generate monthly data with configurable patterns.
@@ -322,7 +332,8 @@ class TimeSeriesDatasetGenerator:
                 Options: "trend", "seasonal", "mixed", "random_walk",
                          "multi_seasonal", "regime_change"
                 Default: ["seasonal"]
-            **kwargs: Additional parameters for generate().
+            **kwargs: Additional parameters for generate(); these override
+                the monthly defaults (e.g. ``seasonality_period=6``).
 
         Returns:
             DataFrame with monthly time series (Date, y).
@@ -330,20 +341,19 @@ class TimeSeriesDatasetGenerator:
         if patterns is None:
             patterns = ["seasonal"]
 
+        kwargs.setdefault("granularity", "1mo")
+        kwargs.setdefault("seasonality_period", 12)  # Annual cycle
+
         return TimeSeriesDatasetGenerator.generate(
             n_samples=n_samples,
-            granularity="1mo",
             patterns=patterns,
-            seasonality_period=12,  # Annual cycle
             **kwargs,
         )
 
     @staticmethod
     def quick_daily(
-        n_samples: int = 365,  # Default: 1 year of daily data
-        patterns: Optional[
-            List[Union[TimeSeriesPattern, str]]
-        ] = None,  # Options: "trend", "seasonal", "mixed", "random_walk", "multi_seasonal", "regime_change"
+        n_samples: int = 365,
+        patterns: Optional[List[Union[TimeSeriesPattern, str]]] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """Generate daily data with configurable patterns.
@@ -365,20 +375,19 @@ class TimeSeriesDatasetGenerator:
         if patterns is None:
             patterns = ["mixed"]
 
+        kwargs.setdefault("granularity", "1d")
+        kwargs.setdefault("seasonality_period", 7)  # Weekly cycle
+
         return TimeSeriesDatasetGenerator.generate(
             n_samples=n_samples,
-            granularity="1d",
             patterns=patterns,
-            seasonality_period=7,  # Weekly cycle
             **kwargs,
         )
 
     @staticmethod
     def quick_hourly(
-        n_samples: int = 720,  # Default: 30 days of hourly data
-        patterns: Optional[
-            List[Union[TimeSeriesPattern, str]]
-        ] = None,  # Options: "trend", "seasonal", "mixed", "random_walk", "multi_seasonal", "regime_change"
+        n_samples: int = 720,
+        patterns: Optional[List[Union[TimeSeriesPattern, str]]] = None,
         **kwargs,
     ) -> pd.DataFrame:
         """Generate hourly data with configurable patterns.
@@ -399,12 +408,13 @@ class TimeSeriesDatasetGenerator:
         if patterns is None:
             patterns = ["multi_seasonal"]
 
+        kwargs.setdefault("granularity", "1h")
+        kwargs.setdefault("seasonality_period", 24)  # Daily cycle
+        kwargs.setdefault("secondary_period", 168)  # Weekly cycle (24 * 7)
+
         return TimeSeriesDatasetGenerator.generate(
             n_samples=n_samples,
-            granularity="1h",
             patterns=patterns,
-            seasonality_period=24,  # Daily cycle
-            secondary_period=168,  # Weekly cycle (24 * 7)
             **kwargs,
         )
 
@@ -441,7 +451,23 @@ class TimeSeriesDatasetGenerator:
         ]
 
     @staticmethod
-    def benchmark_datasets() -> dict:
+    def list_available_datasets() -> List[str]:
+        """List the datasets returned by benchmark_datasets().
+
+        Returns:
+            List of dataset names with descriptions.
+        """
+        return [
+            "monthly_seasonal      - 120 months, annual seasonality",
+            "monthly_trend         - 120 months, linear trend",
+            "daily_mixed           - 365 days, trend + weekly seasonality + noise",
+            "daily_random_walk     - 365 days, random walk",
+            "hourly_multi_seasonal - 720 hours, daily + weekly seasonality",
+            "regime_change         - 300 days, trend with two level shifts",
+        ]
+
+    @staticmethod
+    def benchmark_datasets() -> Dict[str, pd.DataFrame]:
         """Generate multiple datasets for benchmarking.
 
         Returns:

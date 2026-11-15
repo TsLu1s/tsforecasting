@@ -142,6 +142,11 @@ tsf = TSForecasting(
     # Evaluation settings
     granularity='1mo',          # Time granularity
     metric='MAE',               # Evaluation metric: 'MAE', 'MAPE', 'MSE'
+
+    # Preprocessing / output (defaults shown)
+    scaler='standard',          # Feature scaler: 'standard', 'minmax', 'robust'
+    datetime_features=True,     # Add date-based features
+    verbose=True,               # Print evaluation progress (False = silent)
 )
 
 print("\nPipeline configured:")
@@ -165,6 +170,9 @@ tsf.fit_forecast(dataset=data)
 
 print("\n Pipeline fitted")
 print(f"  Best model: {tsf.selected_model}")
+
+# Models that raised during evaluation are skipped and reported here
+print(f"  Skipped models: {tsf.failed_models or 'none'}")
 
 # =============================================================================
 # 5. RESULTS EXTRACTION
@@ -254,7 +262,18 @@ tsf = TSForecasting(
     hparameters=model_configurations(),
     granularity='1mo',          # '1m', '30m', '1h', '1d', '1wk', '1mo'
     metric='MAE',               # 'MAE', 'MAPE', 'MSE'
+    scaler='standard',          # 'standard', 'minmax', 'robust'
+    datetime_features=True,     # Date-based features
+    verbose=True,               # Progress output
 )
+
+
+INPUT DATA REQUIREMENTS:
+------------------------
+- 'Date': datetime column, one row per timestamp, regular spacing
+- 'y'   : numeric target, no missing values
+- Rows are sorted chronologically if needed; duplicated timestamps and
+  missing values raise a DatasetError; other columns are ignored
 
 
 DATA GENERATION:

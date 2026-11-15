@@ -3,6 +3,7 @@
 from tsforecasting.evaluation.engine import EvaluationEngine
 from tsforecasting.evaluation.intervals import (
     ConformalIntervalEstimator,
+    EnsembleIntervalEstimator,
     GaussianIntervalEstimator,
     IntervalEstimator,
     IntervalEstimatorFactory,
@@ -11,6 +12,7 @@ from tsforecasting.evaluation.intervals import (
     compute_intervals,
 )
 from tsforecasting.evaluation.metrics import (
+    METRIC_COLUMNS,
     METRIC_STRATEGIES,
     MAEStrategy,
     MAPEStrategy,
@@ -22,30 +24,30 @@ from tsforecasting.evaluation.metrics import (
     get_all_strategies,
     get_metric_strategy,
     metrics_regression,
+    resolve_metric_column,
     vertical_performance,
 )
 
 __all__ = [
-    # Engine
     "EvaluationEngine",
-    # Interval estimation
     "IntervalMethod",
     "IntervalEstimator",
     "QuantileIntervalEstimator",
     "ConformalIntervalEstimator",
     "GaussianIntervalEstimator",
+    "EnsembleIntervalEstimator",
     "IntervalEstimatorFactory",
     "compute_intervals",
-    # Metric strategies
     "MetricStrategy",
     "MAEStrategy",
     "MAPEStrategy",
     "MSEStrategy",
     "MaxErrorStrategy",
     "METRIC_STRATEGIES",
+    "METRIC_COLUMNS",
+    "resolve_metric_column",
     "get_metric_strategy",
     "get_all_strategies",
-    # Utilities
     "metrics_regression",
     "vertical_performance",
     "best_model",

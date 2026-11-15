@@ -2,7 +2,8 @@ pandas>=1.4.4
 numpy>=1.23.5
 python-dateutil>=2.8.2
 scikit-learn>=1.2.2
+pydantic>=2.0
 autogluon>=1.1.0
-xgboost==2.0.3
+xgboost>=2.0.3
 catboost>=1.2.2
 tqdm>=4.65.2

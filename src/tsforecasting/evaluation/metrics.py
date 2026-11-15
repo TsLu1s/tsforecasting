@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import Dict, List, Union
 
 import numpy as np
 import pandas as pd
@@ -13,10 +13,6 @@ from sklearn.metrics import (
 )
 
 from tsforecasting.core.enums import EvaluationMetric
-
-# =============================================================================
-# Metric Strategy Classes
-# =============================================================================
 
 
 class MetricStrategy(ABC):
@@ -108,7 +104,6 @@ class MaxErrorStrategy(MetricStrategy):
         return float(max_error(y_true, y_pred))
 
 
-# Strategy registry
 METRIC_STRATEGIES: Dict[str, MetricStrategy] = {
     "mae": MAEStrategy(),
     "mape": MAPEStrategy(),
@@ -135,12 +130,50 @@ def get_metric_strategy(metric: EvaluationMetric | str) -> MetricStrategy:
 
 def get_all_strategies() -> List[MetricStrategy]:
     """Get all metric strategies."""
-    return [MAEStrategy(), MAPEStrategy(), MSEStrategy(), MaxErrorStrategy()]
+    return list(METRIC_STRATEGIES.values())
 
 
-# =============================================================================
-# Utility Functions
-# =============================================================================
+# Short metric keys -> column names used in the performance tables.
+METRIC_COLUMNS: Dict[str, str] = {
+    "MAE": "Mean Absolute Error",
+    "MAPE": "Mean Absolute Percentage Error",
+    "MSE": "Mean Squared Error",
+    "MAX_ERROR": "Max Error",
+}
+
+# How each metric column is summarised across windows.
+_AGGREGATIONS: Dict[str, str] = {
+    "Mean Absolute Error": "mean",
+    "Mean Absolute Percentage Error": "mean",
+    "Mean Squared Error": "mean",
+    "Max Error": "max",
+}
+
+
+def resolve_metric_column(metric: Union[EvaluationMetric, str]) -> str:
+    """Translate a metric identifier into its performance-table column name.
+
+    Args:
+        metric: Metric enum, short key ("MAE", "mape", ...) or full column name.
+
+    Returns:
+        Column name, e.g. "Mean Absolute Error".
+
+    Raises:
+        ValueError: If the metric is not recognised.
+    """
+    if isinstance(metric, EvaluationMetric):
+        return metric.display_name
+
+    key = str(metric).strip()
+    normalised = key.upper().replace(" ", "_")
+    if normalised in METRIC_COLUMNS:
+        return METRIC_COLUMNS[normalised]
+    for column in METRIC_COLUMNS.values():
+        if column.lower() == key.lower():
+            return column
+
+    raise ValueError(f"Unknown metric: '{metric}'. Options: 'MAE', 'MAPE', 'MSE'")
 
 
 def metrics_regression(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
@@ -151,14 +184,10 @@ def metrics_regression(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, floa
         y_pred: Predicted values.
 
     Returns:
-        Dictionary of metric names to values.
+        Dictionary of metric names to values. MAPE is expressed in percent and
+        is not meaningful when ``y_true`` contains values at or near zero.
     """
-    return {
-        "Mean Absolute Error": mean_absolute_error(y_true, y_pred),
-        "Mean Absolute Percentage Error": mean_absolute_percentage_error(y_true, y_pred) * 100,
-        "Mean Squared Error": mean_squared_error(y_true, y_pred),
-        "Max Error": max_error(y_true, y_pred),
-    }
+    return {strategy.name: strategy.compute(y_true, y_pred) for strategy in get_all_strategies()}
 
 
 def vertical_performance(forecasts: pd.DataFrame, horizon: int) -> pd.DataFrame:
@@ -171,88 +200,80 @@ def vertical_performance(forecasts: pd.DataFrame, horizon: int) -> pd.DataFrame:
     Returns:
         DataFrame with performance metrics per model/window/horizon.
     """
-    df = forecasts.copy()
+    if forecasts is None or forecasts.empty:
+        raise ValueError("No forecasts available to evaluate.")
+
     horizons = list(range(1, horizon + 1))
     results = []
 
-    for model in df["Model"].unique():
-        for window in df["Window"].unique():
-            model_window_data = df[(df["Model"] == model) & (df["Window"] == window)]
+    for (model, window), group in forecasts.groupby(["Model", "Window"], sort=False):
+        for h in horizons:
+            y_true = group[f"y_horizon_{h}"].to_numpy()
+            y_pred = group[f"y_forecast_horizon_{h}"].to_numpy()
 
-            for h in horizons:
-                y_true = model_window_data[f"y_horizon_{h}"]
-                y_pred = model_window_data[f"y_forecast_horizon_{h}"]
-
-                meta = {"Model": model, "Window": window, "Horizon": h}
-                metrics = metrics_regression(y_true.values, y_pred.values)
-                results.append({**meta, **metrics})
+            meta = {"Model": model, "Window": window, "Horizon": h}
+            results.append({**meta, **metrics_regression(y_true, y_pred)})
 
     results_df = pd.DataFrame(results)
     return results_df.sort_values(by=["Model", "Window", "Horizon"])
 
 
-def best_model(results: pd.DataFrame, metric: str = "MAE") -> str:
+def best_model(results: pd.DataFrame, metric: str = "MAE", verbose: bool = True) -> str:
     """Identify best performing model based on metric.
 
     Args:
         results: Performance results DataFrame.
         metric: Metric to use for comparison (MAE, MAPE, MSE).
+        verbose: Whether to print the selected model.
 
     Returns:
         Name of best performing model.
     """
-    metric_mapping = {
-        "MAE": "Mean Absolute Error",
-        "MAPE": "Mean Absolute Percentage Error",
-        "MSE": "Mean Squared Error",
-    }
-    _metric = metric_mapping.get(metric.upper(), metric)
+    _metric = resolve_metric_column(metric)
 
-    # Aggregate by model and horizon
     aggregated = results.groupby(["Model", "Horizon"])[_metric].mean().reset_index()
 
-    # Get mean across all horizons per model
     mean_by_model = aggregated.groupby("Model")[_metric].mean().reset_index()
 
-    # Find best model
+    if mean_by_model[_metric].isna().all():
+        raise ValueError(f"Cannot select a model: '{_metric}' is undefined for every model.")
+
     best = mean_by_model.loc[mean_by_model[_metric].idxmin()]
 
-    print(
-        f"The model with the best performance was {best['Model']} "
-        f"with an (mean) {_metric} of {round(best[_metric], 4)}"
-    )
+    if verbose:
+        print(
+            f"The model with the best performance was {best['Model']} "
+            f"with an (mean) {_metric} of {round(best[_metric], 4)}"
+        )
 
-    return best["Model"]
+    return str(best["Model"])
 
 
 def aggregate_performance(results: pd.DataFrame, metric: str = "MAE") -> Dict[str, pd.DataFrame]:
-    """Aggregate performance results."""
-    metric_mapping = {
-        "MAE": "Mean Absolute Error",
-        "MAPE": "Mean Absolute Percentage Error",
-        "MSE": "Mean Squared Error",
-    }
-    _metric = metric_mapping.get(metric.upper(), metric)
+    """Aggregate performance results.
 
-    by_horizon = (
-        results.groupby(["Model", "Horizon"])
-        .agg(
-            {
-                "Mean Absolute Error": "mean",
-                "Mean Absolute Percentage Error": "mean",
-                "Mean Squared Error": "mean",
-                "Max Error": "max",
-            }
-        )
-        .reset_index()
-    )
+    Args:
+        results: Performance results DataFrame (one row per model/window/horizon).
+        metric: Metric used to rank the leaderboard (MAE, MAPE, MSE).
+
+    Returns:
+        Dictionary with:
+        - "by_horizon": metrics per model and horizon, aggregated across windows.
+        - "leaderboard": metrics per model, best model first.
+
+        Error metrics are averaged; "Max Error" reports the largest error observed.
+    """
+    _metric = resolve_metric_column(metric)
+    aggregations = {col: how for col, how in _AGGREGATIONS.items() if col in results.columns}
+
+    by_horizon = results.groupby(["Model", "Horizon"]).agg(aggregations).reset_index()
 
     leaderboard = (
         results.groupby("Model")
-        .mean(numeric_only=True)
+        .agg(aggregations)
         .reset_index()
-        .drop(columns=["Window", "Horizon"], errors="ignore")
         .sort_values(by=_metric, ascending=True)
+        .reset_index(drop=True)
     )
 
     return {"by_horizon": by_horizon, "leaderboard": leaderboard}

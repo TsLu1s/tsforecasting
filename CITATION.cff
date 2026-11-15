@@ -3,9 +3,9 @@ message: "If you use this Python package, please cite it as below."
 authors:
 - family-names: "Santos"
   given-names: "Luís"
-  orcid: "https://orcid:0000-0002-4121-1133"
+  orcid: "https://orcid.org/0000-0002-4121-1133"
 title: "TSForecasting - Automated Time Series Forecasting Framework"
-version: 1.2.16
+version: 2.1.0
 doi: ""
 date-released: 2022-11-07
 url: "https://github.com/TsLu1s/TSForecasting"

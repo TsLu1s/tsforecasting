@@ -5,11 +5,11 @@ using an Expanding Window evaluation approach with multiple regression models.
 
 Example:
     from tsforecasting import TSForecasting, model_configurations
-    
+
     # Load data
     data = pd.read_csv('timeseries.csv')
     data['Date'] = pd.to_datetime(data['Date'])
-    
+
     # Configure and fit
     tsf = TSForecasting(
         train_size=0.8,
@@ -18,19 +18,16 @@ Example:
         models=['RandomForest', 'XGBoost']
     )
     tsf.fit_forecast(data)
-    
+
     # Get results
     performance = tsf.history()
     forecast = tsf.forecast()
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 __author__ = "Luis Santos"
 
-# Builder
 from tsforecasting.core.base import TSForecastingBuilder
-
-# Enums for type-safe configuration
 from tsforecasting.core.enums import (
     EvaluationMetric,
     Granularity,
@@ -38,38 +35,30 @@ from tsforecasting.core.enums import (
     ScalerType,
     TimeSeriesPattern,
 )
-
-# Exceptions
 from tsforecasting.core.exceptions import (
+    ConfigurationError,
     DatasetError,
+    InsufficientDataError,
+    ModelFitError,
     ModelNotFoundError,
     NotFittedError,
     TSForecastingError,
     ValidationError,
 )
-
-# Schemas for advanced usage
 from tsforecasting.core.schemas import (
     ForecastConfig,
+    PerformanceHistory,
     PipelineConfig,
     PreprocessingConfig,
 )
-
-# Data generation
 from tsforecasting.data.generator import TimeSeriesDatasetGenerator
-
-# Evaluation utilities
+from tsforecasting.evaluation.intervals import IntervalEstimatorFactory, compute_intervals
 from tsforecasting.evaluation.metrics import (
     best_model,
     metrics_regression,
     vertical_performance,
 )
-
-# Base forecaster and AutoGluon
 from tsforecasting.models.base import AutoGluonForecaster, BaseForecaster
-
-# Forecasting models (legacy naming convention for backward compatibility)
-# Forecasting models (new naming convention)
 from tsforecasting.models.forecasters import (
     FORECASTER_CLASSES,
     CatBoost_Forecasting,
@@ -87,30 +76,19 @@ from tsforecasting.models.forecasters import (
     XGBoost_Forecasting,
     XGBoostForecaster,
 )
-
-# Configuration utilities
 from tsforecasting.models.registry import ModelRegistry, model_configurations
-
-# Core pipeline
 from tsforecasting.pipeline.forecasting import TSForecasting
 from tsforecasting.processing.feature_selection import TreeBasedFeatureSelector
-
-# Processing utilities
 from tsforecasting.processing.processor import Processing
 
 __all__ = [
-    # Version
     "__version__",
-    # Main classes
     "TSForecasting",
     "TSForecastingBuilder",
-    # Registry
     "ModelRegistry",
     "model_configurations",
-    # Base forecaster
     "BaseForecaster",
     "AutoGluonForecaster",
-    # Forecasters (new naming)
     "RandomForestForecaster",
     "ExtraTreesForecaster",
     "GBRForecaster",
@@ -119,7 +97,6 @@ __all__ = [
     "XGBoostForecaster",
     "CatBoostForecaster",
     "FORECASTER_CLASSES",
-    # Forecasters (legacy naming for backward compatibility)
     "RandomForest_Forecasting",
     "ExtraTrees_Forecasting",
     "GBR_Forecasting",
@@ -127,29 +104,29 @@ __all__ = [
     "GeneralizedLR_Forecasting",
     "XGBoost_Forecasting",
     "CatBoost_Forecasting",
-    # Processing
     "Processing",
     "TreeBasedFeatureSelector",
-    # Data
     "TimeSeriesDatasetGenerator",
-    # Evaluation
     "vertical_performance",
     "best_model",
     "metrics_regression",
-    # Enums
+    "IntervalEstimatorFactory",
+    "compute_intervals",
     "Granularity",
     "EvaluationMetric",
     "ModelName",
     "TimeSeriesPattern",
     "ScalerType",
-    # Schemas
     "ForecastConfig",
     "PreprocessingConfig",
     "PipelineConfig",
-    # Exceptions
+    "PerformanceHistory",
     "TSForecastingError",
     "NotFittedError",
     "ValidationError",
+    "ConfigurationError",
     "ModelNotFoundError",
+    "ModelFitError",
     "DatasetError",
+    "InsufficientDataError",
 ]

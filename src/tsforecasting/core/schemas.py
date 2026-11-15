@@ -1,7 +1,7 @@
 """Pydantic models and dataclasses for TSForecasting package."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -14,10 +14,6 @@ from tsforecasting.core.enums import (
     ScalerType,
 )
 
-# =============================================================================
-# Pydantic Configuration Models
-# =============================================================================
-
 
 class ForecastConfig(BaseModel):
     """Configuration for forecasting pipeline."""
@@ -29,12 +25,19 @@ class ForecastConfig(BaseModel):
     granularity: Granularity = Field(default=Granularity.DAILY)
     metric: EvaluationMetric = Field(default=EvaluationMetric.MAE)
 
-    model_config = {"use_enum_values": False}
+    # validate_assignment keeps the constraints above enforced when a field is
+    # changed after construction (e.g. through the builder ``with_*`` methods).
+    model_config = {"use_enum_values": False, "validate_assignment": True}
 
-    @field_validator("sliding_size")
+    @field_validator("granularity", mode="before")
     @classmethod
-    def sliding_size_recommendation(cls, v: int, info) -> int:
-        return v
+    def _parse_granularity(cls, value: Any) -> Any:
+        return Granularity.from_string(value) if isinstance(value, str) else value
+
+    @field_validator("metric", mode="before")
+    @classmethod
+    def _parse_metric(cls, value: Any) -> Any:
+        return EvaluationMetric.from_string(value) if isinstance(value, str) else value
 
 
 class ModelConfig(BaseModel):
@@ -52,7 +55,12 @@ class PreprocessingConfig(BaseModel):
     scaler: ScalerType = Field(default=ScalerType.STANDARD)
     datetime_features: bool = Field(default=True)
 
-    model_config = {"use_enum_values": False}
+    model_config = {"use_enum_values": False, "validate_assignment": True}
+
+    @field_validator("scaler", mode="before")
+    @classmethod
+    def _parse_scaler(cls, value: Any) -> Any:
+        return ScalerType.from_string(value) if isinstance(value, str) else value
 
 
 class PipelineConfig(BaseModel):
@@ -60,16 +68,44 @@ class PipelineConfig(BaseModel):
 
     forecast: ForecastConfig = Field(default_factory=ForecastConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
-    models: List[ModelName] = Field(
+    # Built-in models are stored as ``ModelName`` members; models added through
+    # ``ModelRegistry.register`` are stored under their registered string name.
+    models: List[Union[ModelName, str]] = Field(
         default_factory=lambda: [ModelName.RANDOM_FOREST, ModelName.GBR, ModelName.XGBOOST]
     )
 
-    model_config = {"use_enum_values": False}
+    model_config = {"use_enum_values": False, "validate_assignment": True}
 
+    @field_validator("models", mode="before")
+    @classmethod
+    def _normalise_models(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, (list, tuple)):
+            return value
 
-# =============================================================================
-# Immutable Result Dataclasses
-# =============================================================================
+        parsed: List[Any] = []
+        for model in value:
+            if isinstance(model, str) and not isinstance(model, ModelName):
+                try:
+                    model = ModelName(model)
+                except ValueError:
+                    model = model.strip()
+            if model not in parsed:
+                parsed.append(model)
+        return parsed
+
+    @field_validator("models")
+    @classmethod
+    def _require_models(cls, value: List[Union[ModelName, str]]) -> List[Union[ModelName, str]]:
+        if not value:
+            raise ValueError("At least one model must be provided.")
+        return value
+
+    @property
+    def selected_models(self) -> List[str]:
+        """Model identifiers as plain strings."""
+        return [m.value if isinstance(m, ModelName) else str(m) for m in self.models]
 
 
 @dataclass(frozen=True)

@@ -52,6 +52,9 @@ learning format with lag features and horizon targets.
 Raw data:       Date, y
                 ↓
 Transformed:    Date, y_lag_1, y_lag_2, ..., y_horizon_1, y_horizon_2, ...
+
+Each row is one forecast origin t: the lags are the window of values up to
+and including t, the horizons are the values that follow it.
 """)
 
 
@@ -137,7 +140,8 @@ COLUMN STRUCTURE:
 
 LAG FEATURES ({len(lag_cols)} columns):
   {lag_cols}
-  → Previous values: y_lag_1 = t-1, y_lag_2 = t-2, ..., y_lag_{LAGS} = t-{LAGS}
+  → Window ending at the forecast origin t, oldest value first:
+    y_lag_1 = t-{LAGS - 1}, y_lag_2 = t-{LAGS - 2}, ..., y_lag_{LAGS} = t (most recent)
 
 HORIZON TARGETS ({len(horizon_cols)} columns):
   {horizon_cols}
@@ -151,9 +155,11 @@ OTHER ({len(other_cols)} columns):
   {other_cols}
 """)
 
-# Visual representation
+# Visual representation: the three most recent lags followed by the first horizons,
+# so every row reads in chronological order (each row is the previous one shifted by 1)
 print("Sample transformation:")
-sample_cols = ['y_lag_3', 'y_lag_2', 'y_lag_1', 'y_horizon_1', 'y_horizon_2', 'y_horizon_3']
+sample_cols = [f'y_lag_{LAGS - 2}', f'y_lag_{LAGS - 1}', f'y_lag_{LAGS}',
+               'y_horizon_1', 'y_horizon_2', 'y_horizon_3']
 available = [c for c in sample_cols if c in timeseries.columns]
 print(timeseries[available].head(5).to_string(index=False))
 
@@ -197,7 +203,8 @@ print("\n" + "-" * 70)
 print("2.2 Handle NaN Values")
 print("-" * 70)
 
-# The last row(s) have NaN in horizons (future forecasting row)
+# The last HORIZON rows have NaN in horizons: their targets lie beyond the end of
+# the data. The very last row is the one used to forecast the future.
 nan_count = timeseries[target_cols].isna().any(axis=1).sum()
 print(f"Rows with NaN in targets: {nan_count}")
 
@@ -234,12 +241,18 @@ print("=" * 70)
 print("""
 Expanding Window evaluation progressively increases the training set:
 
-  Iteration 1: Train [0:80%], Test [80%:100%]
-  Iteration 2: Train [0:80%+slide], Test [80%+slide:100%]
+  Iteration 1: Train [0 : 80% - gap],         Test [80% : 80% + horizon]
+  Iteration 2: Train [0 : 80% + slide - gap], Test [80% + slide : 80% + slide + horizon]
   ...
-  
+
 This simulates realistic forecasting where you train on all available
 historical data and evaluate on future unseen data.
+
+Why the gap? A row built at origin t holds the targets t+1 ... t+horizon. The
+(horizon - 1) rows right before the first test origin therefore contain target
+values that were not yet observed at that origin. Training on them would leak
+the future into the model, so they are purged (gap = horizon - 1). This is
+what TSForecasting does internally.
 """)
 
 
@@ -253,6 +266,7 @@ print("-" * 70)
 
 TRAIN_SIZE = 0.80
 SLIDING_SIZE = 10
+GAP = HORIZON - 1   # rows purged before each test window (look-ahead protection)
 
 total_samples = len(timeseries_clean)
 initial_train = int(total_samples * TRAIN_SIZE)
@@ -264,6 +278,7 @@ print(f"  Total samples: {total_samples}")
 print(f"  Initial train: {initial_train} ({TRAIN_SIZE*100:.0f}%)")
 print(f"  Test pool: {test_size}")
 print(f"  Sliding size: {SLIDING_SIZE}")
+print(f"  Gap (purged rows): {GAP}")
 print(f"  Iterations: {iterations}")
 
 
@@ -277,9 +292,9 @@ print("-" * 70)
 
 print("Train/Test splits per iteration:")
 for i in range(iterations):
-    train_end = initial_train + (i * SLIDING_SIZE)
-    test_start = train_end
-    test_end = total_samples
+    test_start = initial_train + (i * SLIDING_SIZE)
+    train_end = test_start - GAP
+    test_end = test_start + HORIZON
     print(f"  Iter {i+1}: Train [0:{train_end}], Test [{test_start}:{test_end}] ({test_end - test_start} samples)")
 
 
@@ -293,19 +308,26 @@ print("-" * 70)
 
 def expanding_window_evaluate(X, y, model_class, model_params, 
                                train_size, sliding_size):
-    """Manual expanding window evaluation."""
+    """Manual expanding window evaluation (leak-free)."""
     total = len(X)
+    horizon = y.shape[1]
+    gap = horizon - 1
     initial = int(total * train_size)
     iterations = (total - initial) // sliding_size
     
     results = []
     
     for i in range(iterations):
-        current_train = initial + (i * sliding_size)
+        test_start = initial + (i * sliding_size)
+        current_train = test_start - gap
         
-        # Split
-        X_train, X_test = X[:current_train], X[current_train:]
-        y_train, y_test = y[:current_train], y[current_train:]
+        # Split: train on rows whose targets are known at the first test origin,
+        # evaluate the next `horizon` forecast origins
+        X_train, X_test = X[:current_train], X[test_start:test_start + horizon]
+        y_train, y_test = y[:current_train], y[test_start:test_start + horizon]
+        
+        if len(X_test) < horizon:
+            continue
         
         # Scale
         scaler = StandardScaler()
@@ -417,7 +439,7 @@ print(f"  Predictions shape: {xgb_pred.shape}")
 # -----------------------------------------------------------------------------
 
 print("\n" + "-" * 70)
-print("4.4 FORECASTER_CLASSES Dictionary")
+print("4.3 FORECASTER_CLASSES Dictionary")
 print("-" * 70)
 
 print(f"Available classes: {list(FORECASTER_CLASSES.keys())}")
@@ -547,7 +569,7 @@ future_dates = processor.future_timestamps(
 
 print(f"Last date in data: {last_date}")
 print(f"Future timestamps ({len(future_dates)}):")
-for date in future_dates:
+for date in future_dates["Date"]:
     print(f"  {date}")
 
 # =============================================================================
@@ -598,27 +620,30 @@ model_class = FORECASTER_CLASSES["RandomForest"]
 model = model_class(n_estimators=100)
 
 
-EXPANDING WINDOW:
------------------
+EXPANDING WINDOW (leak-free):
+-----------------------------
 total = len(X)
+horizon = y.shape[1]
+gap = horizon - 1                      # purge rows whose targets are not yet observed
 initial_train = int(total * 0.8)
 sliding_size = 10
 iterations = (total - initial_train) // sliding_size
 
 for i in range(iterations):
-    train_end = initial_train + (i * sliding_size)
-    X_train, X_test = X[:train_end], X[train_end:]
-    y_train, y_test = y[:train_end], y[train_end:]
+    test_start = initial_train + (i * sliding_size)
+    train_end = test_start - gap
+    X_train, X_test = X[:train_end], X[test_start:test_start + horizon]
+    y_train, y_test = y[:train_end], y[test_start:test_start + horizon]
     
     model.fit(X_train, y_train)
     predictions = model.predict(X_test)
 
 
-COLUMN NAMING:
---------------
-- y_lag_N    : Value at time t-N (input feature)
+COLUMN NAMING (row = forecast origin t, window of W lags):
+----------------------------------------------------------
+- y_lag_N    : Value at time t-(W-N); y_lag_1 is the oldest, y_lag_W is time t
 - y_horizon_N: Value at time t+N (target variable)
-- Date_*     : Datetime-derived features
+- Date_*     : Datetime-derived features of the forecast origin t
 """)
 
 print("=" * 70)

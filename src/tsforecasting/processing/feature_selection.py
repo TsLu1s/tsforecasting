@@ -65,6 +65,9 @@ class TreeBasedFeatureSelector:
                 f"Unknown algorithm: {algorithm}. " f"Available: {list(self.ALGORITHMS.keys())}"
             )
 
+        if n_estimators < 1:
+            raise ValueError("n_estimators must be a positive integer")
+
         self._algorithm = algorithm
         self._n_estimators = n_estimators
         self._relevance = relevance_threshold
@@ -90,7 +93,7 @@ class TreeBasedFeatureSelector:
             Normalized weight array.
         """
         weights = np.array([self._horizon_decay ** (h - 1) for h in range(1, n_horizons + 1)])
-        return weights / weights.sum()  # Normalize to sum to 1
+        return weights / weights.sum()
 
     def fit(self, X: pd.DataFrame, y: Union[pd.Series, pd.DataFrame, np.ndarray]):
         """
@@ -106,22 +109,29 @@ class TreeBasedFeatureSelector:
         Returns:
             Self for method chaining.
         """
+        if not isinstance(X, pd.DataFrame):
+            raise TypeError("X must be a pandas DataFrame with named feature columns.")
+        if X.shape[1] == 0:
+            raise ValueError("X must contain at least one feature column.")
+
         features = list(X.columns)
         X_values = X.values
 
-        # Handle different y formats
-        if isinstance(y, pd.Series):
-            y_values = y.values.reshape(-1, 1)
-        elif isinstance(y, pd.DataFrame):
-            y_values = y.values
-        else:
-            y_values = np.atleast_2d(y)
-            if y_values.shape[0] == 1:
-                y_values = y_values.T
+        y_values = np.asarray(y.values if isinstance(y, (pd.Series, pd.DataFrame)) else y)
+        if y_values.ndim == 1:
+            y_values = y_values.reshape(-1, 1)
+
+        if y_values.shape[0] != X_values.shape[0]:
+            raise ValueError(
+                f"X and y have inconsistent lengths: {X_values.shape[0]} vs {y_values.shape[0]} rows."
+            )
+        if pd.isna(y_values).any():
+            raise ValueError(
+                "y contains missing values. Drop the rows with incomplete targets before fitting."
+            )
 
         self._n_horizons = y_values.shape[1]
 
-        # Compute importances for each horizon
         importances_per_horizon = []
         model_class = self.ALGORITHMS[self._algorithm]
 
@@ -130,26 +140,21 @@ class TreeBasedFeatureSelector:
             model.fit(X_values, y_values[:, h])
             importances_per_horizon.append(model.feature_importances_)
 
-        # Create per-horizon importance DataFrame
         horizon_cols = {f"horizon_{h+1}": imp for h, imp in enumerate(importances_per_horizon)}
         self._importances_by_horizon = pd.DataFrame({"variable": features, **horizon_cols})
 
-        # Compute weighted mean importance
         weights = self._compute_horizon_weights(self._n_horizons)
         importances_array = np.array(importances_per_horizon)  # Shape: (n_horizons, n_features)
         weighted_importances = np.average(importances_array, axis=0, weights=weights)
 
-        # Create aggregated importance DataFrame
         self._feature_importances = (
             pd.DataFrame({"variable": features, "percentage": weighted_importances})
             .sort_values(by="percentage", ascending=False)
             .reset_index(drop=True)
         )
 
-        # Add cumulative percentage
         self._feature_importances["cumulative"] = self._feature_importances["percentage"].cumsum()
 
-        # Select features by cumulative importance
         cumulative = 0.0
         selected = []
 
@@ -175,6 +180,9 @@ class TreeBasedFeatureSelector:
             DataFrame with selected features only.
         """
         self._check_fitted()
+        missing = [c for c in self._selected_features if c not in X.columns]
+        if missing:
+            raise ValueError(f"X is missing selected feature columns: {missing}")
         return X[self._selected_features].copy()
 
     def fit_transform(

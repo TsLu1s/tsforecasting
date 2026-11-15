@@ -102,7 +102,9 @@ class GBRForecaster(BaseForecaster):
 
     Args:
         n_estimators: Number of boosting stages.
-        criterion: Function to measure split quality.
+        criterion: Function to measure split quality. Left to the scikit-learn
+            default when None (the parameter is deprecated in scikit-learn >= 1.9
+            and is only forwarded when set explicitly).
         learning_rate: Shrinks contribution of each tree.
         max_depth: Maximum depth of individual estimators.
         min_samples_split: Minimum samples required to split a node.
@@ -113,7 +115,7 @@ class GBRForecaster(BaseForecaster):
     def __init__(
         self,
         n_estimators: int = 100,
-        criterion: str = "friedman_mse",
+        criterion: Optional[str] = None,
         learning_rate: float = 0.1,
         max_depth: int = 3,
         min_samples_split: int = 2,
@@ -121,9 +123,10 @@ class GBRForecaster(BaseForecaster):
         loss: str = "squared_error",
         **kwargs,
     ):
+        if criterion is not None:
+            kwargs["criterion"] = criterion
         super().__init__(
             n_estimators=n_estimators,
-            criterion=criterion,
             learning_rate=learning_rate,
             max_depth=max_depth,
             min_samples_split=min_samples_split,
@@ -203,7 +206,6 @@ class GeneralizedLRForecaster(BaseForecaster):
         verbose: int = 0,
         **kwargs,
     ):
-        # Note: verbose is not passed to TweedieRegressor as it doesn't accept it
         super().__init__(
             power=power,
             alpha=alpha,
@@ -316,10 +318,6 @@ class CatBoostForecaster(BaseForecaster):
         return CatBoostRegressor(**params)
 
 
-# =============================================================================
-# Legacy class aliases for backward compatibility
-# =============================================================================
-
 # These aliases match the original forecasting_models.py naming convention
 RandomForest_Forecasting = RandomForestForecaster
 ExtraTrees_Forecasting = ExtraTreesForecaster
@@ -329,10 +327,6 @@ GeneralizedLR_Forecasting = GeneralizedLRForecaster
 XGBoost_Forecasting = XGBoostForecaster
 CatBoost_Forecasting = CatBoostForecaster
 
-
-# =============================================================================
-# Class registry for model lookup
-# =============================================================================
 
 FORECASTER_CLASSES: Dict[str, type] = {
     "RandomForest": RandomForestForecaster,
@@ -344,7 +338,6 @@ FORECASTER_CLASSES: Dict[str, type] = {
     "Catboost": CatBoostForecaster,
 }
 
-# Legacy naming convention mapping
 LEGACY_FORECASTER_CLASSES: Dict[str, type] = {
     "RandomForest": RandomForest_Forecasting,
     "ExtraTrees": ExtraTrees_Forecasting,

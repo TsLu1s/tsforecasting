@@ -153,7 +153,13 @@ Available builder methods:
   .with_granularity(str)        # '1m', '30m', '1h', '1d', '1wk', '1mo'
   .with_metric(str)             # 'MAE', 'MAPE', 'MSE'
   .with_preprocessing(...)      # Scaler and feature options
+  .with_scaler(str)             # 'standard', 'minmax', 'robust'
+  .with_datetime_features(bool) # Add/skip date-based features
+  .with_verbose(bool)           # Print/silence evaluation progress
   .build()                      # Create TSForecasting instance
+
+Every setter validates its value: an out-of-range number or an unknown
+name raises ConfigurationError (ModelNotFoundError for models).
 """)
 
 
@@ -171,7 +177,7 @@ horizons, using attention-weighted aggregation where closer horizons
 (h1, h2, ...) receive higher weight than distant ones.
 
 Weight formula: w_h = decay^(h-1), normalized to sum to 1
-Default decay=0.8: h1=0.36, h2=0.29, h3=0.23, h4=0.18, h5=0.15 (for 5 horizons)
+Default decay=0.8: h1=0.30, h2=0.24, h3=0.19, h4=0.15, h5=0.12 (for 5 horizons)
 """)
 
 
@@ -246,7 +252,7 @@ selector = TreeBasedFeatureSelector(
     algorithm="ExtraTrees",
     n_estimators=100,
     relevance_threshold=0.95,
-    horizon_decay=0.8,  # h1 weighted ~2x more than h5
+    horizon_decay=0.8,  # h1 weighted ~2.4x more than h5
     random_state=42,
 )
 
@@ -269,7 +275,7 @@ print("-" * 70)
 selector.fit(X, y)
 
 # Get horizon weights
-print(f"\nHorizon weights (decay={selector._horizon_decay}):")
+print(f"\nHorizon weights (decay={selector.get_selection_summary()['horizon_decay']}):")
 weights = selector.horizon_weights
 for i, w in enumerate(weights):
     print(f"  Horizon {i+1}: {w:.4f} ({w*100:.1f}%)")
@@ -481,6 +487,6 @@ X_reduced = selector.transform(X)
 HORIZON DECAY EXPLAINED:
 ------------------------
 decay=1.0  → Equal weight to all horizons
-decay=0.8  → h1=36%, h2=29%, h3=23%, h4=18%, h5=15% (for 5 horizons)
+decay=0.8  → h1=30%, h2=24%, h3=19%, h4=15%, h5=12% (for 5 horizons)
 decay=0.5  → h1=52%, h2=26%, h3=13%, h4=6%, h5=3% (aggressive near-term focus)
 """)

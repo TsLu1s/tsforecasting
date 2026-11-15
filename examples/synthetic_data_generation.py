@@ -9,7 +9,7 @@ Topics covered:
 - Available granularities and patterns
 - generate() method with all parameters
 - Quick generators (monthly, daily, hourly)
-- Example datasets with random_generation
+- Benchmark dataset catalogue
 - Benchmark datasets for evaluation
 """
 
@@ -35,7 +35,7 @@ print("\nPatterns:")
 for p in TimeSeriesDatasetGenerator.list_available_patterns():
     print(f"  {p}")
 
-print("\nExample Datasets:")
+print("\nBenchmark Datasets:")
 for d in TimeSeriesDatasetGenerator.list_available_datasets():
     print(f"  {d}")
 
@@ -167,7 +167,7 @@ for name, df in benchmarks.items():
 # =============================================================================
 
 print("\n" + "=" * 70)
-print("7. QUICK REFERENCE")
+print("6. QUICK REFERENCE")
 print("=" * 70)
 
 print("""

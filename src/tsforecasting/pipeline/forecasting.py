@@ -2,18 +2,27 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+from pydantic import ValidationError as PydanticValidationError
 
-from tsforecasting.core.base import BasePipeline, BuilderPipeline, TSForecastingBuilder
-from tsforecasting.core.enums import EvaluationMetric, Granularity, ModelName, ScalerType
-from tsforecasting.core.exceptions import NotFittedError
-from tsforecasting.core.schemas import (  # ForecastOutput,
+from tsforecasting.core.base import (
+    BasePipeline,
+    BuilderPipeline,
+    TSForecastingBuilder,
+    format_validation_error,
+    resolve_model_names,
+)
+from tsforecasting.core.exceptions import (
+    ConfigurationError,
+    InsufficientDataError,
+    NotFittedError,
+)
+from tsforecasting.core.schemas import (
     ForecastConfig,
     PerformanceHistory,
     PipelineConfig,
     PreprocessingConfig,
 )
-from tsforecasting.evaluation.engine import EvaluationEngine
+from tsforecasting.evaluation.engine import EvaluationEngine, get_scaler
 from tsforecasting.evaluation.intervals import IntervalEstimatorFactory
 from tsforecasting.evaluation.metrics import (
     aggregate_performance,
@@ -34,9 +43,14 @@ class TSForecasting(BasePipeline, BuilderPipeline):
     The pipeline supports:
     - Multiple forecasting models (RandomForest, XGBoost, etc.)
     - Configurable lag features and forecast horizons
-    - Expanding window cross-validation
+    - Expanding window cross-validation, free of look-ahead leakage
     - Automatic model selection based on performance metrics
-    - Confidence interval estimation
+    - Prediction interval estimation
+
+    The input dataset needs a datetime ``Date`` column and a numeric ``y``
+    column, with one row per timestamp at regular spacing. Rows are sorted
+    chronologically when needed; missing values and duplicated timestamps are
+    rejected with a ``DatasetError``. Additional columns are ignored.
 
     Example:
         # Basic usage
@@ -64,7 +78,7 @@ class TSForecasting(BasePipeline, BuilderPipeline):
                .build())
 
     Attributes:
-        train_size: Proportion of data for training (0.3 to 1.0).
+        train_size: Proportion of data for training (0.3 up to, excluding, 1.0).
         lags: Number of lag features (window size).
         horizon: Number of future steps to forecast.
         sliding_size: Window slide size for expanding evaluation.
@@ -72,9 +86,11 @@ class TSForecasting(BasePipeline, BuilderPipeline):
         hparameters: Model hyperparameter configurations.
         granularity: Time granularity of data.
         metric: Evaluation metric for model selection.
+        selected_model: Best performing model (after fitting).
+        failed_models: Models skipped because they raised during evaluation.
     """
 
-    # Available models for reference
+    # Built-in models for reference (see ModelRegistry.list_available() for all)
     AVAILABLE_MODELS = [
         "RandomForest",
         "ExtraTrees",
@@ -86,7 +102,6 @@ class TSForecasting(BasePipeline, BuilderPipeline):
         "AutoGluon",
     ]
 
-    # Fixed coverage levels for prediction intervals
     _COVERAGE_LEVELS = (0.80, 0.90, 0.95, 0.99)
 
     def __init__(
@@ -95,54 +110,66 @@ class TSForecasting(BasePipeline, BuilderPipeline):
         lags: int = 7,
         horizon: int = 15,
         sliding_size: int = 15,
-        models: List[str] = None,
+        models: Optional[List[str]] = None,
         hparameters: Optional[Dict[str, Dict[str, Any]]] = None,
         granularity: str = "1d",
         metric: str = "MAE",
         scaler: str = "standard",
         datetime_features: bool = True,
+        verbose: bool = True,
     ):
         """Initialize TSForecasting pipeline.
 
         Args:
-            train_size: Training data proportion (0.3 to 1.0).
+            train_size: Training data proportion (0.3 up to, excluding, 1.0).
             lags: Number of lag features.
             horizon: Forecast horizon (steps ahead).
             sliding_size: Sliding window size for evaluation.
-            models: List of model names to evaluate.
+            models: List of model names to evaluate (case-insensitive). Any
+                model registered in ``ModelRegistry`` can be used.
             hparameters: Custom hyperparameters dict.
             granularity: Time granularity (1m, 30m, 1h, 1d, 1wk, 1mo).
             metric: Evaluation metric (MAE, MAPE, MSE).
             scaler: Feature scaler (standard, minmax, robust).
             datetime_features: Whether to engineer datetime features.
+            verbose: Whether to print evaluation progress.
+
+        Raises:
+            ConfigurationError: If a parameter is out of range or not recognised.
+            ModelNotFoundError: If a model name is not registered.
         """
         super().__init__()
 
-        # Default models
         if models is None:
             models = ["RandomForest", "GBR", "XGBoost"]
 
-        # Build configuration
-        self._config = PipelineConfig(
-            forecast=ForecastConfig(
-                train_size=train_size,
-                lags=lags,
-                horizon=horizon,
-                sliding_size=sliding_size,
-                granularity=Granularity(granularity),
-                metric=EvaluationMetric(metric.lower()),
-            ),
-            preprocessing=PreprocessingConfig(
-                scaler=ScalerType(scaler),
-                datetime_features=datetime_features,
-            ),
-            models=[ModelName(m) for m in models],
-        )
+        if hparameters is not None and not isinstance(hparameters, dict):
+            raise ConfigurationError(
+                "hparameters must be a dictionary mapping model names to parameter dictionaries."
+            )
 
-        # Hyperparameters
-        self._hparameters = hparameters or model_configurations()
+        try:
+            self._config = PipelineConfig(
+                forecast=ForecastConfig(
+                    train_size=train_size,
+                    lags=lags,
+                    horizon=horizon,
+                    sliding_size=sliding_size,
+                    granularity=granularity,
+                    metric=metric,
+                ),
+                preprocessing=PreprocessingConfig(
+                    scaler=scaler,
+                    datetime_features=datetime_features,
+                ),
+                models=resolve_model_names(models),
+            )
+        except PydanticValidationError as exc:
+            raise ConfigurationError(format_validation_error(exc)) from exc
 
-        # Internal state
+        self._hparameters = hparameters if hparameters is not None else model_configurations()
+        self._verbose = bool(verbose)
+
         self._processor = Processing()
         self._evaluation_engine: Optional[EvaluationEngine] = None
         self._model_instances: Dict[str, BaseForecaster] = {}
@@ -151,6 +178,8 @@ class TSForecasting(BasePipeline, BuilderPipeline):
         self._complete_performance: Optional[pd.DataFrame] = None
         self._timeseries: Optional[pd.DataFrame] = None
         self._scaler = None
+        self._failed_models: Dict[str, str] = {}
+        self._final_forecast: Optional[Tuple[pd.DataFrame, np.ndarray, pd.DataFrame]] = None
 
     @classmethod
     def builder(cls) -> TSForecastingBuilder:
@@ -160,10 +189,6 @@ class TSForecasting(BasePipeline, BuilderPipeline):
             TSForecastingBuilder instance.
         """
         return TSForecastingBuilder()
-
-    # =========================================================================
-    # Properties for backward compatibility
-    # =========================================================================
 
     @property
     def train_size(self) -> float:
@@ -195,29 +220,54 @@ class TSForecasting(BasePipeline, BuilderPipeline):
 
     @property
     def models(self) -> List[str]:
-        return [m.value for m in self._config.models]
+        return self._config.selected_models
 
-    # =========================================================================
-    # Abstract method implementations
-    # =========================================================================
+    @property
+    def failed_models(self) -> Dict[str, str]:
+        """Models skipped during the last fit, mapped to the error they raised."""
+        return dict(self._failed_models)
+
+    @property
+    def is_fitted(self) -> bool:
+        return self._is_fitted
+
+    @property
+    def verbose(self) -> bool:
+        return self._verbose
+
+    def _on_config_change(self) -> None:
+        """Invalidate fitted state: a changed configuration requires a new fit."""
+        if self._is_fitted:
+            self._is_fitted = False
+            self._selected_model = None
+            self._final_forecast = None
+
+    def _params_for(self, name: str) -> Dict[str, Any]:
+        """Hyperparameters supplied for a model (name matched case-insensitively)."""
+        hparameters = self._hparameters or {}
+        if name in hparameters:
+            return hparameters[name] or {}
+        for key, params in hparameters.items():
+            if str(key).lower() == name.lower():
+                return params or {}
+        return {}
 
     def _preprocess(self, dataset: pd.DataFrame) -> None:
         """Preprocess dataset and initialize models."""
-        self._dataset = dataset.copy()
+        self._dataset = dataset
+        self._failed_models = {}
+        self._final_forecast = None
+        self._selected_model = None
 
-        # Initialize evaluation engine
         self._evaluation_engine = EvaluationEngine(
             config=self._config.forecast,
             preprocessing=self._config.preprocessing,
+            verbose=self._verbose,
         )
 
-        # Initialize model instances
         self._model_instances = {}
-        for model_name in self._config.models:
-            name = model_name.value
-            if name in self.AVAILABLE_MODELS:
-                params = self._hparameters.get(name, {})
-                self._model_instances[name] = ModelRegistry.get(name, params)
+        for name in self._config.selected_models:
+            self._model_instances[name] = ModelRegistry.get(name, self._params_for(name))
 
     def _run_evaluation(self) -> None:
         """Run expanding window evaluation for all models."""
@@ -225,19 +275,17 @@ class TSForecasting(BasePipeline, BuilderPipeline):
             dataset=self._dataset,
             models=self._model_instances,
         )
+        self._failed_models = self._evaluation_engine.failed_models
 
-        # Compute performance metrics
         self._complete_performance = vertical_performance(
             self._fit_predictions, self.horizon
         ).reset_index(drop=True)
 
     def _select_best_model(self) -> None:
         """Select best model based on metric."""
-        self._selected_model = best_model(self._complete_performance, metric=self.metric)
-
-    # =========================================================================
-    # Public methods
-    # =========================================================================
+        self._selected_model = best_model(
+            self._complete_performance, metric=self.metric, verbose=self._verbose
+        )
 
     def history(self) -> PerformanceHistory:
         """Get historical performance data.
@@ -249,6 +297,8 @@ class TSForecasting(BasePipeline, BuilderPipeline):
             - performance_by_horizon: Aggregated by horizon
             - leaderboard: Model rankings
             - selected_model: Best performing model name
+
+            The DataFrames are copies: editing them does not affect the pipeline.
 
         Raises:
             NotFittedError: If pipeline not fitted.
@@ -262,8 +312,8 @@ class TSForecasting(BasePipeline, BuilderPipeline):
         )
 
         return PerformanceHistory(
-            predictions=self._fit_predictions,
-            performance_complete=self._complete_performance,
+            predictions=self._fit_predictions.copy(),
+            performance_complete=self._complete_performance.copy(),
             performance_by_horizon=aggregated["by_horizon"],
             leaderboard=aggregated["leaderboard"],
             selected_model=self._selected_model,
@@ -272,9 +322,14 @@ class TSForecasting(BasePipeline, BuilderPipeline):
     def forecast(
         self,
         dataset: Optional[pd.DataFrame] = None,
-        interval_method: str = "ensemble",  # Options: "ensemble", "quantile", "conformal", "gaussian"
+        interval_method: str = "ensemble",
     ) -> pd.DataFrame:
         """Generate future forecasts using best model.
+
+        The selected model is refitted on every row with complete targets and
+        used to predict the ``horizon`` steps after the last timestamp. The
+        fit is cached, so calling ``forecast`` again on the same data (e.g. to
+        compare interval methods) does not retrain the model.
 
         Args:
             dataset: Input data (uses fit data if not provided).
@@ -295,63 +350,94 @@ class TSForecasting(BasePipeline, BuilderPipeline):
 
         Raises:
             NotFittedError: If pipeline not fitted.
+            ValueError: If ``interval_method`` is not recognised.
         """
         if not self._is_fitted:
             raise NotFittedError("Pipeline not fitted. Call fit_forecast first.")
 
-        X = dataset.copy() if dataset is not None else self._dataset.copy()
-        self._validate_dataset(X)
+        # Fail fast on an unknown interval method, before any model is trained
+        IntervalEstimatorFactory.create(interval_method, self._COVERAGE_LEVELS[0])
 
-        # Generate future timestamps
-        forecast_df = self._processor.future_timestamps(X, self.horizon, self.granularity)
+        if dataset is None:
+            X = self._dataset
+        else:
+            X = self._prepare_dataset(dataset, announce=False)
 
-        # Prepare time series
-        timeseries = self._processor.make_timeseries(
-            dataset=X,
-            window_size=self.lags,
-            horizon=self.horizon,
-        )
-        self._timeseries = timeseries.copy()
+        forecast_df, point_forecast = self._point_forecast(X)
 
-        # Split for final prediction
-        train = timeseries.iloc[: -self.horizon].copy()
-        test = timeseries.tail(1).copy()
-
-        # Get column lists
-        input_cols = self._evaluation_engine.input_cols
-
-        # Scale
-        self._scaler = self._get_scaler()
-        self._scaler.fit(train[input_cols])
-        train[input_cols] = self._scaler.transform(train[input_cols])
-        test[input_cols] = self._scaler.transform(test[input_cols])
-
-        # Get best model and predict
-        best_model_instance = self._model_instances[self._selected_model]
-
-        predictions = self._evaluation_engine.single_fit_predict(
-            train=train,
-            test=test,
-            model=best_model_instance,
-            model_name=self._selected_model,
-        )
-
-        # Extract point forecasts
-        point_forecast = predictions.values.flatten()[: self.horizon]
-        forecast_df["y"] = point_forecast
-
-        # Compute prediction intervals for fixed coverage levels
         for coverage in self._COVERAGE_LEVELS:
             lower, upper = self._compute_intervals(
                 forecast=point_forecast,
                 method=interval_method,
                 coverage=coverage,
             )
-            coverage_pct = int(coverage * 100)
+            coverage_pct = int(round(coverage * 100))
             forecast_df[f"y_lower_{coverage_pct}"] = lower
             forecast_df[f"y_upper_{coverage_pct}"] = upper
 
         return forecast_df
+
+    def _point_forecast(self, X: pd.DataFrame) -> Tuple[pd.DataFrame, np.ndarray]:
+        """Fit the selected model on all available data and predict the future.
+
+        Args:
+            X: Prepared dataset (validated and sorted).
+
+        Returns:
+            Tuple of (DataFrame with future ``Date`` and ``y``, point forecast array).
+        """
+        if self._final_forecast is not None:
+            cached_data, cached_forecast, cached_frame = self._final_forecast
+            if cached_data is X or cached_data.equals(X):
+                return cached_frame.copy(), cached_forecast.copy()
+
+        forecast_df = self._processor.future_timestamps(X, self.horizon, self.granularity)
+
+        timeseries = self._processor.make_timeseries(
+            dataset=X,
+            window_size=self.lags,
+            horizon=self.horizon,
+            datetime_engineering=self._config.preprocessing.datetime_features,
+        )
+        self._timeseries = timeseries.copy()
+
+        # Split for final prediction: every row with complete targets vs. the last origin
+        train = timeseries.iloc[: -self.horizon]
+        test = timeseries.tail(1)
+
+        if train.empty:
+            raise InsufficientDataError(
+                f"Insufficient data to forecast: {len(X)} observations cannot provide a "
+                f"training sample for lags={self.lags} and horizon={self.horizon}."
+            )
+
+        input_cols = self._evaluation_engine.input_cols
+        target_cols = self._evaluation_engine.target_cols
+
+        self._scaler = self._get_scaler()
+        self._scaler.fit(train[input_cols])
+        train_scaled = pd.DataFrame(
+            self._scaler.transform(train[input_cols]), columns=input_cols, index=train.index
+        )
+        test_scaled = pd.DataFrame(
+            self._scaler.transform(test[input_cols]), columns=input_cols, index=test.index
+        )
+        train_scaled[target_cols] = train[target_cols]
+
+        best_model_instance = self._model_instances[self._selected_model]
+
+        predictions = self._evaluation_engine.single_fit_predict(
+            train=train_scaled,
+            test=test_scaled,
+            model=best_model_instance,
+            model_name=self._selected_model,
+        )
+
+        point_forecast = predictions.to_numpy().flatten()[: self.horizon]
+        forecast_df["y"] = point_forecast
+
+        self._final_forecast = (X, point_forecast.copy(), forecast_df.copy())
+        return forecast_df, point_forecast
 
     def _compute_intervals(
         self,
@@ -370,7 +456,6 @@ class TSForecasting(BasePipeline, BuilderPipeline):
             Tuple of (lower_bounds, upper_bounds).
         """
 
-        # Extract historical actuals and predictions for the selected model
         y_true, y_pred = self._get_historical_residuals()
 
         estimator = IntervalEstimatorFactory.create(method, coverage)
@@ -384,12 +469,10 @@ class TSForecasting(BasePipeline, BuilderPipeline):
         Returns:
             Tuple of (y_true, y_pred) arrays, shape (n_samples, n_horizons).
         """
-        df = self._fit_predictions.copy()
+        df = self._fit_predictions
 
-        # Filter for selected model
         model_df = df[df["Model"] == self._selected_model]
 
-        # Extract actual and predicted columns
         actual_cols = [f"y_horizon_{i+1}" for i in range(self.horizon)]
         pred_cols = [f"y_forecast_horizon_{i+1}" for i in range(self.horizon)]
 
@@ -400,12 +483,7 @@ class TSForecasting(BasePipeline, BuilderPipeline):
 
     def _get_scaler(self):
         """Get scaler based on configuration."""
-        scalers = {
-            ScalerType.STANDARD: StandardScaler,
-            ScalerType.MINMAX: MinMaxScaler,
-            ScalerType.ROBUST: RobustScaler,
-        }
-        return scalers[self._config.preprocessing.scaler]()
+        return get_scaler(self._config.preprocessing.scaler)
 
     def get_config(self) -> PipelineConfig:
         """Get current pipeline configuration."""
@@ -417,7 +495,12 @@ class TSForecasting(BasePipeline, BuilderPipeline):
         Returns:
             BaseForecaster instance or None.
         """
-        return self._model_instances.get(name)
+        if name in self._model_instances:
+            return self._model_instances[name]
+        for key, model in self._model_instances.items():
+            if key.lower() == str(name).lower():
+                return model
+        return None
 
     def __repr__(self) -> str:
         models_str = ", ".join(self.models[:3])

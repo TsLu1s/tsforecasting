@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from statistics import NormalDist
+from typing import List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 
 
 class IntervalMethod(str, Enum):
@@ -19,11 +19,52 @@ class IntervalMethod(str, Enum):
     ENSEMBLE = "ensemble"
 
 
+def _prepare_residual_inputs(
+    y_true: np.ndarray, y_pred: np.ndarray, min_samples: int = 1
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Validate and align historical actuals and predictions.
+
+    One-dimensional inputs are read as ``n_samples`` observations of a single
+    horizon. Samples containing missing values are discarded.
+
+    Returns:
+        Tuple of float arrays with shape (n_samples, n_horizons).
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+
+    if y_true.ndim == 1:
+        y_true = y_true.reshape(-1, 1)
+    if y_pred.ndim == 1:
+        y_pred = y_pred.reshape(-1, 1)
+
+    if y_true.shape != y_pred.shape:
+        raise ValueError(
+            f"y_true and y_pred must have the same shape, got {y_true.shape} and {y_pred.shape}."
+        )
+
+    valid = ~(np.isnan(y_true).any(axis=1) | np.isnan(y_pred).any(axis=1))
+    y_true, y_pred = y_true[valid], y_pred[valid]
+
+    if y_true.shape[0] < min_samples:
+        raise ValueError(
+            f"At least {min_samples} historical sample(s) are required to estimate "
+            f"prediction intervals, got {y_true.shape[0]}."
+        )
+
+    return y_true, y_pred
+
+
 class IntervalEstimator(ABC):
     """Abstract base class for prediction interval estimation.
 
     Prediction intervals quantify forecast uncertainty by providing
     lower and upper bounds around point predictions.
+
+    Intervals are calibrated on out-of-sample residuals, so the coverage that
+    can be resolved depends on how many residuals are available: with ``n``
+    samples per horizon, empirical bounds cannot go beyond the most extreme
+    residual observed, which caps the attainable coverage near ``n / (n + 1)``.
     """
 
     def __init__(self, coverage: float = 0.90):
@@ -37,6 +78,21 @@ class IntervalEstimator(ABC):
             raise ValueError(f"Coverage must be in (0, 1), got {coverage}")
         self.coverage = coverage
         self._is_fitted = False
+        self._n_horizons: Optional[int] = None
+
+    def _check_forecast(self, forecast: np.ndarray) -> np.ndarray:
+        """Validate fitted state and forecast shape before computing bounds."""
+        if not self._is_fitted:
+            raise RuntimeError("Estimator not fitted. Call fit() first.")
+
+        forecast = np.atleast_1d(np.asarray(forecast, dtype=float))
+        n_horizons = self._n_horizons
+        if n_horizons not in (None, 1) and forecast.shape[-1] != n_horizons:
+            raise ValueError(
+                f"Forecast has {forecast.shape[-1]} horizon(s) but the estimator was "
+                f"fitted on {n_horizons}."
+            )
+        return forecast
 
     @abstractmethod
     def fit(self, y_true: np.ndarray, y_pred: np.ndarray) -> "IntervalEstimator":
@@ -103,16 +159,15 @@ class QuantileIntervalEstimator(IntervalEstimator):
 
     def fit(self, y_true: np.ndarray, y_pred: np.ndarray) -> "QuantileIntervalEstimator":
         """Fit by computing empirical quantiles of residuals per horizon."""
-        y_true = np.atleast_2d(y_true)
-        y_pred = np.atleast_2d(y_pred)
+        y_true, y_pred = _prepare_residual_inputs(y_true, y_pred)
 
         residuals = y_true - y_pred  # Shape: (n_samples, n_horizons)
+        self._n_horizons = residuals.shape[1]
 
         alpha = 1 - self.coverage
         q_low = alpha / 2 * 100  # e.g., 5th percentile for 90% coverage
         q_high = (1 - alpha / 2) * 100  # e.g., 95th percentile
 
-        # Compute quantiles per horizon
         self._quantiles_low = np.percentile(residuals, q_low, axis=0)
         self._quantiles_high = np.percentile(residuals, q_high, axis=0)
         self._is_fitted = True
@@ -121,10 +176,7 @@ class QuantileIntervalEstimator(IntervalEstimator):
 
     def predict(self, forecast: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Apply quantile-based intervals to forecast."""
-        if not self._is_fitted:
-            raise RuntimeError("Estimator not fitted. Call fit() first.")
-
-        forecast = np.atleast_1d(forecast)
+        forecast = self._check_forecast(forecast)
         lower = forecast + self._quantiles_low
         upper = forecast + self._quantiles_high
 
@@ -151,6 +203,8 @@ class ConformalIntervalEstimator(IntervalEstimator):
         - Basic version produces symmetric, constant-width intervals
         - Requires calibration set (reduces effective training data)
         - May be conservative (wider than necessary)
+        - With n calibration samples the guarantee only holds for coverage
+          levels up to n / (n + 1); above that the widest observed error is used
 
     Note:
         This implements split conformal prediction. For adaptive-width
@@ -168,29 +222,29 @@ class ConformalIntervalEstimator(IntervalEstimator):
 
     def fit(self, y_true: np.ndarray, y_pred: np.ndarray) -> "ConformalIntervalEstimator":
         """Fit by computing conformity score quantiles per horizon."""
-        y_true = np.atleast_2d(y_true)
-        y_pred = np.atleast_2d(y_pred)
+        y_true, y_pred = _prepare_residual_inputs(y_true, y_pred)
 
         # Nonconformity scores (absolute errors)
         scores = np.abs(y_true - y_pred)  # Shape: (n_samples, n_horizons)
+        self._n_horizons = scores.shape[1]
 
-        # Conformal quantile with finite-sample correction
+        # Conformal quantile with finite-sample correction: the k-th smallest
+        # score with k = ceil((n + 1) * coverage). It is taken as an observed
+        # order statistic (no interpolation), which is what the coverage
+        # guarantee relies on. When k exceeds n the guarantee would require an
+        # unbounded interval; the largest observed score is used instead.
         n = scores.shape[0]
-        q_level = np.ceil((n + 1) * self.coverage) / n * 100
-        q_level = min(q_level, 100)  # Cap at 100
+        rank = int(np.ceil((n + 1) * self.coverage - 1e-9))
+        rank = min(max(rank, 1), n)
 
-        # Compute quantile per horizon
-        self._conformity_quantiles = np.percentile(scores, q_level, axis=0)
+        self._conformity_quantiles = np.sort(scores, axis=0)[rank - 1]
         self._is_fitted = True
 
         return self
 
     def predict(self, forecast: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Apply conformal intervals to forecast."""
-        if not self._is_fitted:
-            raise RuntimeError("Estimator not fitted. Call fit() first.")
-
-        forecast = np.atleast_1d(forecast)
+        forecast = self._check_forecast(forecast)
         lower = forecast - self._conformity_quantiles
         upper = forecast + self._conformity_quantiles
 
@@ -233,29 +287,26 @@ class GaussianIntervalEstimator(IntervalEstimator):
 
     def fit(self, y_true: np.ndarray, y_pred: np.ndarray) -> "GaussianIntervalEstimator":
         """Fit by estimating residual mean and std per horizon."""
-        from scipy import stats
-
-        y_true = np.atleast_2d(y_true)
-        y_pred = np.atleast_2d(y_pred)
+        y_true, y_pred = _prepare_residual_inputs(y_true, y_pred)
 
         residuals = y_true - y_pred
+        self._n_horizons = residuals.shape[1]
 
         self._bias = np.mean(residuals, axis=0)
-        self._std = np.std(residuals, axis=0, ddof=1)
+        # A single residual carries no spread information: fall back to zero width.
+        ddof = 1 if residuals.shape[0] > 1 else 0
+        self._std = np.std(residuals, axis=0, ddof=ddof)
 
         # Z-score for desired coverage (two-tailed)
         alpha = 1 - self.coverage
-        self._z_score = stats.norm.ppf(1 - alpha / 2)
+        self._z_score = NormalDist().inv_cdf(1 - alpha / 2)
         self._is_fitted = True
 
         return self
 
     def predict(self, forecast: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Apply Gaussian intervals to forecast."""
-        if not self._is_fitted:
-            raise RuntimeError("Estimator not fitted. Call fit() first.")
-
-        forecast = np.atleast_1d(forecast)
+        forecast = self._check_forecast(forecast)
         margin = self._z_score * self._std
 
         lower = forecast + self._bias - margin
@@ -302,13 +353,13 @@ class EnsembleIntervalEstimator(IntervalEstimator):
         """Fit all underlying estimators."""
         for estimator in self._estimators:
             estimator.fit(y_true, y_pred)
+        self._n_horizons = self._estimators[0]._n_horizons
         self._is_fitted = True
         return self
 
     def predict(self, forecast: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Average intervals from all estimators."""
-        if not self._is_fitted:
-            raise RuntimeError("Estimator not fitted. Call fit() first.")
+        forecast = self._check_forecast(forecast)
 
         lowers, uppers = [], []
         for estimator in self._estimators:
@@ -341,20 +392,24 @@ class IntervalEstimatorFactory:
         """Create an interval estimator.
 
         Args:
-            method: Estimation method ("quantile", "conformal", "gaussian").
+            method: Estimation method ("quantile", "conformal", "gaussian", "ensemble").
             coverage: Desired coverage level (0.0 to 1.0).
 
         Returns:
             Configured IntervalEstimator instance.
+
+        Raises:
+            ValueError: If the method is not recognised.
         """
-        if isinstance(method, str):
-            method = IntervalMethod(method.lower())
+        if not isinstance(method, IntervalMethod):
+            try:
+                method = IntervalMethod(str(method).lower().strip())
+            except ValueError:
+                raise ValueError(
+                    f"Unknown interval method: '{method}'. Available: {cls.list_methods()}"
+                ) from None
 
-        estimator_class = cls._estimators.get(method)
-        if estimator_class is None:
-            raise ValueError(f"Unknown method: {method}. Available: {list(cls._estimators.keys())}")
-
-        return estimator_class(coverage=coverage)
+        return cls._estimators[method](coverage=coverage)
 
     @classmethod
     def list_methods(cls) -> List[str]:
@@ -362,7 +417,6 @@ class IntervalEstimatorFactory:
         return [m.value for m in IntervalMethod]
 
 
-# Convenience function
 def compute_intervals(
     forecast: np.ndarray,
     y_true: np.ndarray,
@@ -376,7 +430,7 @@ def compute_intervals(
         forecast: Point forecasts for which to compute intervals.
         y_true: Historical actual values.
         y_pred: Historical predictions.
-        method: Interval method ("quantile", "conformal", "gaussian").
+        method: Interval method ("quantile", "conformal", "gaussian", "ensemble").
         coverage: Desired coverage level.
 
     Returns:

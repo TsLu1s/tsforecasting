@@ -9,7 +9,7 @@ This module provides:
 """
 
 from tsforecasting.models.base import AutoGluonForecaster, BaseForecaster
-from tsforecasting.models.forecasters import (  # New naming convention; Legacy naming convention (backward compatibility)
+from tsforecasting.models.forecasters import (
     FORECASTER_CLASSES,
     LEGACY_FORECASTER_CLASSES,
     CatBoost_Forecasting,
@@ -30,10 +30,8 @@ from tsforecasting.models.forecasters import (  # New naming convention; Legacy 
 from tsforecasting.models.registry import ModelRegistry, model_configurations
 
 __all__ = [
-    # Base classes
     "BaseForecaster",
     "AutoGluonForecaster",
-    # New naming convention
     "RandomForestForecaster",
     "ExtraTreesForecaster",
     "GBRForecaster",
@@ -41,7 +39,6 @@ __all__ = [
     "GeneralizedLRForecaster",
     "XGBoostForecaster",
     "CatBoostForecaster",
-    # Legacy naming convention (backward compatibility)
     "RandomForest_Forecasting",
     "ExtraTrees_Forecasting",
     "GBR_Forecasting",
@@ -49,10 +46,8 @@ __all__ = [
     "GeneralizedLR_Forecasting",
     "XGBoost_Forecasting",
     "CatBoost_Forecasting",
-    # Registries
     "FORECASTER_CLASSES",
     "LEGACY_FORECASTER_CLASSES",
-    # Registry and configuration
     "ModelRegistry",
     "model_configurations",
 ]
