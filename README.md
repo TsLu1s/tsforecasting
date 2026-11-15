@@ -56,8 +56,6 @@ Major frameworks used to build this project:
   </a>
 </p>
 
-<p align="center"><sub>Click the diagram to open it at full resolution. Source: <a href="https://github.com/TsLu1s/tsforecasting/blob/main/docs/TSForecasting_Pipeline_Diagram.drawio"><code>docs/TSForecasting_Pipeline_Diagram.drawio</code></a> (editable in <a href="https://app.diagrams.net">diagrams.net</a>).</sub></p>
-
 The pipeline runs in four stages:
 
 1. **Preprocessing**: validates the input (rows sorted by date; missing values and duplicated timestamps rejected) and turns the series into a supervised table of lag features and multi-step horizon targets, with optional datetime features.
@@ -78,7 +76,6 @@ pip install tsforecasting
 ```
 
 Python 3.10 or newer is required.
-
 
 # Usage Examples
     
